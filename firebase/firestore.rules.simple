@@ -1,0 +1,151 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Admin Users Collection (for web admin panel)
+    match /admin_users/{userId} {
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow read, update: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ['super_admin', 'system_admin'];
+    }
+
+    // Test Collection (for Firebase connection testing)
+    match /test-connection/{docId} {
+      allow read, write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
+    }
+
+    // Mobile App Users collection
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // SIMPLIFIED EXAMS COLLECTION RULES
+    match /exams/{examId} {
+      // Allow all authenticated users to read all exams (simplified for debugging)
+      allow read: if request.auth != null;
+      
+      // Allow authenticated users to create/update exams (for testing)
+      allow create, update: if request.auth != null;
+      
+      // Allow web admin users to delete exams
+      allow delete: if request.auth != null &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true;
+    }
+
+    // Exam Results collection
+    match /exam_results/{resultId} {
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && 
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin']) ||
+          (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true)
+        );
+    }
+
+    // User Progress tracking
+    match /user_progress/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && 
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin']) ||
+          (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true)
+        );
+    }
+
+    // Exam Statistics collection
+    match /exam_stats/{statId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin']) ||
+          (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true)
+        );
+    }
+    
+    // Questions collection
+    match /questions/{questionId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true;
+    }
+
+    // Categories collection
+    match /categories/{categoryId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // Quiz sessions collection
+    match /quiz_sessions/{sessionId} {
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+    
+    // Quiz results collection
+    match /quiz_results/{resultId} {
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+    
+    // Analytics collection (admin only)
+    match /analytics/{analyticsId} {
+      allow read, write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+    
+    // Leaderboard collection
+    match /leaderboard/{leaderboardId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+    
+    // Daily challenges collection
+    match /daily_challenges/{challengeId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+    
+    // User bookmarks
+    match /user_bookmarks/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // App settings (admin only)
+    match /app_settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+  }
+}

@@ -1,0 +1,185 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions for role checking
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isMobileAppUser() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
+    function isMobileAppAdmin() {
+      return isMobileAppUser() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master_admin'];
+    }
+    
+    function isWebAdminUser() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    function isAnyAdmin() {
+      return isMobileAppAdmin() || isWebAdminUser();
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Admin Users Collection (for web admin panel)
+    match /admin_users/{userId} {
+      allow create: if isOwner(userId);
+      allow read, update: if isOwner(userId);
+      allow read, write: if isAuthenticated() &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ['super_admin', 'system_admin'];
+    }
+
+    // Test Collection (for Firebase connection testing)
+    match /test-connection/{docId} {
+      allow read, write: if isWebAdminUser();
+    }
+
+    // Mobile App Users collection
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+      allow read: if isAnyAdmin();
+    }
+    
+    // Exams collection - Main collection for quiz data
+    match /exams/{examId} {
+      // All authenticated users can read active exams
+      allow read: if isAuthenticated() && resource.data.isActive == true;
+      
+      // Admin users can read inactive exams too
+      allow read: if isAnyAdmin();
+      
+      // Only admin users can create/update exams
+      allow create, update: if isAnyAdmin() && 
+        // Validate required fields
+        request.resource.data.keys().hasAll(['name', 'examType', 'numberOfQuestions', 'timeLimit', 'suitableFor', 'isActive']) &&
+        // Validate data types
+        request.resource.data.name is string &&
+        request.resource.data.examType is string &&
+        request.resource.data.numberOfQuestions is number &&
+        request.resource.data.timeLimit is number &&
+        request.resource.data.suitableFor is list &&
+        request.resource.data.isActive is bool;
+      
+      // Only web admin users can delete exams
+      allow delete: if isWebAdminUser();
+    }
+
+    // Exam Results/Attempts collection
+    match /exam_results/{resultId} {
+      // Users can read/write their own exam results
+      allow read, write: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid &&
+        // Validate required fields on write
+        (request.resource == null || 
+         request.resource.data.keys().hasAll(['userId', 'examId', 'score', 'totalQuestions', 'completedAt']));
+      
+      // Admin users can read all exam results
+      allow read: if isAnyAdmin();
+    }
+
+    // User Progress tracking
+    match /user_progress/{userId} {
+      // Users can read/write their own progress
+      allow read, write: if isOwner(userId);
+      
+      // Admin users can read all user progress
+      allow read: if isAnyAdmin();
+    }
+
+    // Exam Statistics collection (for caching aggregated data)
+    match /exam_stats/{statId} {
+      // All authenticated users can read exam statistics
+      allow read: if isAuthenticated();
+      
+      // Only admin users can write/update statistics
+      allow write: if isAnyAdmin();
+    }
+    
+    // Questions collection (if stored separately)
+    match /questions/{questionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAnyAdmin();
+    }
+
+    // Categories collection
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated();
+      allow write: if isAnyAdmin();
+    }
+    
+    // Quiz sessions collection (for tracking active sessions)
+    match /quiz_sessions/{sessionId} {
+      allow read, write: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow read: if isAnyAdmin();
+    }
+    
+    // User bookmarks
+    match /user_bookmarks/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+    
+    // Leaderboard collection
+    match /leaderboard/{leaderboardId} {
+      allow read: if isAuthenticated();
+      allow write: if isAnyAdmin();
+    }
+    
+    // Daily challenges collection
+    match /daily_challenges/{challengeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAnyAdmin();
+    }
+    
+    // Analytics collection (admin only)
+    match /analytics/{analyticsId} {
+      allow read, write: if isAnyAdmin();
+    }
+    
+    // App settings (admin only)
+    match /app_settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAnyAdmin();
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      
+      // Admin users can create/update notifications
+      allow create, update: if isAnyAdmin();
+      
+      // Users can mark their notifications as read
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
+    }
+
+    // User feedback collection
+    match /feedback/{feedbackId} {
+      // Users can create feedback
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+      
+      // Users can read their own feedback
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      
+      // Admin users can read all feedback
+      allow read, update: if isAnyAdmin();
+    }
+  }
+}
