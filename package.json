@@ -1,9 +1,9 @@
 {
   "name": "mcq-quiz-admin",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCQ Quiz System - Web Admin Panel with Notification Management",
   "private": true,
-  "lastDeployment": "2025-01-13T12:00:00Z",
+  "lastDeployment": "2025-01-13T19:30:00Z",
   "dependencies": {
     "@emotion/react": "^11.11.1",
     "@emotion/styled": "^11.11.0",

@@ -163,7 +163,7 @@ const DashboardPage: React.FC = () => {
       icon: <NotificationsIcon />,
       path: '/notifications',
       color: '#FF5722',
-    },
+    }, // Updated: v1.0.2 - Notification Management Card
   ];
 
   const testCards = [
