@@ -1,4 +1,4 @@
-import { collection, addDoc, doc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 export interface TestUser {
@@ -236,7 +236,7 @@ export const createTestUsers = async (): Promise<{ success: boolean; message: st
 
     return {
       success: true,
-      message: `Successfully created ${successCount} test users`,
+      message: `Successfully created ${successCount} test users${errorCount > 0 ? ` (${errorCount} failed)` : ''}`,
       details: results
     };
 

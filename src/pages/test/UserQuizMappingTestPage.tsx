@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography, Paper, Alert, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Button } from '@mui/material';
 import { ExpandMore, Refresh } from '@mui/icons-material';
 import { db } from '../../config/firebase';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 
 interface UserQuizMapping {
   userId: string;

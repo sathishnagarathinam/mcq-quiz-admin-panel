@@ -32,10 +32,6 @@ const NotificationTestPage: React.FC = () => {
   const [designations, setDesignations] = useState<string[]>([]);
   const [offices, setOffices] = useState<string[]>([]);
 
-  useEffect(() => {
-    loadTestData();
-  }, []);
-
   const loadTestData = async () => {
     try {
       const [users, designationsList, officesList] = await Promise.all([
@@ -56,6 +52,10 @@ const NotificationTestPage: React.FC = () => {
       addTestResult(`❌ Error loading test data: ${error}`);
     }
   };
+
+  useEffect(() => {
+    loadTestData();
+  }, []);
 
   const addTestResult = (message: string) => {
     setTestResults(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);

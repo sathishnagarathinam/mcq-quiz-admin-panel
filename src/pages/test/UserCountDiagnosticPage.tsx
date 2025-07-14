@@ -18,11 +18,9 @@ import {
 import {
   Refresh as RefreshIcon,
   ArrowBack as ArrowBackIcon,
-  People as PeopleIcon,
-  Info as InfoIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 
 interface UserData {
