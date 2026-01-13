@@ -23,6 +23,7 @@ import UsersPage from './pages/users/UsersPage';
 import AnalyticsPage from './pages/analytics/AnalyticsPage';
 import MobileUsersPage from './pages/mobile-users/MobileUsersPage';
 import SettingsPage from './pages/settings/SettingsPage';
+import PaymentSettingsPage from './pages/settings/PaymentSettingsPage';
 import BulkUploadPage from './pages/bulk-upload/BulkUploadPage';
 import FirebaseTestPage from './pages/test/FirebaseTestPage';
 import ConfigTestPage from './pages/test/ConfigTestPage';
@@ -34,6 +35,13 @@ import UserManagementPage from './pages/user-management/UserManagementPage';
 import BannerManagement from './pages/banner-management/BannerManagement';
 import LiveTestManagement from './pages/live-test-management/LiveTestManagement';
 import IntegrationTestPage from './pages/test/IntegrationTestPage';
+import UploadDebugPage from './pages/test/UploadDebugPage';
+import UploadDiagnosticPage from './pages/test/UploadDiagnosticPage';
+import ExamHubPage from './pages/exam-hub/ExamHubPage';
+import NewsManagementPage from './pages/exam-hub/NewsManagementPage';
+import TipsManagementPage from './pages/exam-hub/TipsManagementPage';
+import PapersManagementPage from './pages/exam-hub/PapersManagementPage';
+import ResultsManagementPage from './pages/exam-hub/ResultsManagementPage';
 import NotificationSenderPage from './pages/notifications/NotificationSenderPage';
 import NotificationManagementPage from './pages/notifications/NotificationManagementPage';
 import NotificationTestPage from './pages/test/NotificationTestPage';
@@ -41,6 +49,9 @@ import FirebaseConnectionTestPage from './pages/test/FirebaseConnectionTestPage'
 import CreateTestUsersPage from './pages/test/CreateTestUsersPage';
 import UserCountDiagnosticPage from './pages/test/UserCountDiagnosticPage';
 import FCMTokenManagerPage from './pages/test/FCMTokenManagerPage';
+import FeedbackManagementPage from './pages/feedback/FeedbackManagementPage';
+import PaymentManagementPage from './pages/payments/PaymentManagementPage';
+import FreeQuizAccessPage from './pages/free-quiz-access/FreeQuizAccessPage';
 
 // Theme configuration
 const theme = createTheme({
@@ -200,8 +211,10 @@ function App() {
                   <Route path="users" element={<UsersPage />} />
                   <Route path="analytics" element={<AnalyticsPage />} />
                   <Route path="mobile-users" element={<MobileUsersPage />} />
+                  <Route path="feedback" element={<FeedbackManagementPage />} />
                   <Route path="bulk-upload" element={<BulkUploadPage />} />
                   <Route path="settings" element={<SettingsPage />} />
+                  <Route path="settings/payments" element={<PaymentSettingsPage />} />
                   <Route path="test-firebase" element={<FirebaseTestPage />} />
                   <Route path="config-test" element={<ConfigTestPage />} />
                   <Route path="data-structure-test" element={<DataStructureTestPage />} />
@@ -212,6 +225,8 @@ function App() {
                   <Route path="banner-management" element={<BannerManagement />} />
                   <Route path="live-test-management" element={<LiveTestManagement />} />
                   <Route path="integration-test" element={<IntegrationTestPage />} />
+                  <Route path="upload-debug" element={<UploadDebugPage />} />
+                  <Route path="upload-diagnostic" element={<UploadDiagnosticPage />} />
                   <Route path="notifications" element={<NotificationManagementPage />} />
                   <Route path="notifications/send" element={<NotificationSenderPage />} />
                   <Route path="notification-test" element={<NotificationTestPage />} />
@@ -219,6 +234,13 @@ function App() {
                   <Route path="create-test-users" element={<CreateTestUsersPage />} />
                   <Route path="user-count-diagnostic" element={<UserCountDiagnosticPage />} />
                   <Route path="fcm-token-manager" element={<FCMTokenManagerPage />} />
+                  <Route path="exam-hub" element={<ExamHubPage />} />
+                  <Route path="exam-hub/news" element={<NewsManagementPage />} />
+                  <Route path="exam-hub/tips" element={<TipsManagementPage />} />
+                  <Route path="exam-hub/papers" element={<PapersManagementPage />} />
+                  <Route path="exam-hub/results" element={<ResultsManagementPage />} />
+                  <Route path="payments" element={<PaymentManagementPage />} />
+                  <Route path="free-quiz-access" element={<FreeQuizAccessPage />} />
                 </Route>
 
                 {/* Catch all route */}

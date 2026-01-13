@@ -35,8 +35,9 @@ export class NotificationService {
     createdBy: string,
     options: {
       priority?: 'low' | 'normal' | 'high' | 'urgent';
-      category?: 'announcement' | 'quiz_update' | 'exam_alert' | 'general' | 'system';
+      category?: 'announcement' | 'quiz_update' | 'exam_alert' | 'general' | 'system' | 'test_alert';
       scheduledFor?: Date;
+      deliveryMethod?: 'push_only' | 'in_app_only' | 'both';
     } = {}
   ): Promise<string> {
     try {
@@ -49,6 +50,8 @@ export class NotificationService {
         imageUrl: content.imageUrl,
         actionUrl: content.actionUrl,
         actionType: content.actionType,
+        testImageUrl: content.testImageUrl,
+        quizId: content.quizId,
         target,
         status: 'draft',
         sentCount: 0,
@@ -58,6 +61,7 @@ export class NotificationService {
         scheduledFor: options.scheduledFor,
         priority: options.priority || 'normal',
         category: options.category || 'general',
+        deliveryMethod: options.deliveryMethod || 'both',
       };
 
       // Clean the data to remove undefined values (Firestore doesn't accept undefined)
@@ -71,7 +75,28 @@ export class NotificationService {
         createdAt: Timestamp.fromDate(notificationData.createdAt),
         priority: notificationData.priority,
         category: notificationData.category,
+        deliveryMethod: notificationData.deliveryMethod,
       };
+
+      // Add optional fields if they have values
+      if (notificationData.imageUrl) {
+        cleanedData.imageUrl = notificationData.imageUrl;
+      }
+      if (notificationData.actionUrl) {
+        cleanedData.actionUrl = notificationData.actionUrl;
+      }
+      if (notificationData.actionType) {
+        cleanedData.actionType = notificationData.actionType;
+      }
+      if (notificationData.testImageUrl) {
+        cleanedData.testImageUrl = notificationData.testImageUrl;
+      }
+      if (notificationData.quizId) {
+        cleanedData.quizId = notificationData.quizId;
+      }
+      if (notificationData.scheduledFor) {
+        cleanedData.scheduledFor = Timestamp.fromDate(notificationData.scheduledFor);
+      }
 
       // Clean the target object to remove undefined values
       const cleanedTarget: any = {
@@ -107,6 +132,10 @@ export class NotificationService {
 
       if (content.actionType) {
         cleanedData.actionType = content.actionType;
+      }
+
+      if (content.testImageUrl && content.testImageUrl.trim() !== '') {
+        cleanedData.testImageUrl = content.testImageUrl.trim();
       }
 
       if (options.scheduledFor) {
@@ -242,7 +271,9 @@ export class NotificationService {
       }
 
       const notification = { id: notificationDoc.id, ...notificationDoc.data() } as Notification;
-      
+
+      console.log(`🚀 Sending notification "${notification.title}" with delivery method: ${notification.deliveryMethod || 'both'}`);
+
       // Get target users
       const targetUsers = await this.getTargetUsers(notification.target);
       
@@ -286,11 +317,26 @@ export class NotificationService {
             sentAt: Timestamp.fromDate(recipientData.sentAt!),
           };
 
-          batch.set(recipientRef, cleanedRecipientData);
+          // Handle delivery method logic
+          const deliveryMethod = notification.deliveryMethod || 'both';
+          console.log(`📋 Processing user ${user.name} with delivery method: ${deliveryMethod}`);
 
-          // Send push notification if user has FCM token
-          const pushPromise = this.sendPushNotification(user, notification);
-          pushNotificationPromises.push(pushPromise);
+          // Create in-app notification record only if delivery method includes in-app
+          if (deliveryMethod === 'in_app_only' || deliveryMethod === 'both') {
+            batch.set(recipientRef, cleanedRecipientData);
+            console.log(`📱 Created in-app notification record for ${user.name}`);
+          } else {
+            console.log(`⏭️ Skipping in-app notification for ${user.name} (delivery method: ${deliveryMethod})`);
+          }
+
+          // Send push notification only if delivery method includes push
+          if (deliveryMethod === 'push_only' || deliveryMethod === 'both') {
+            const pushPromise = this.sendPushNotification(user, notification);
+            pushNotificationPromises.push(pushPromise);
+            console.log(`🔔 Queued push notification for ${user.name}`);
+          } else {
+            console.log(`⏭️ Skipping push notification for ${user.name} (delivery method: ${deliveryMethod})`);
+          }
 
           sentCount++;
         } catch (error) {
@@ -299,10 +345,14 @@ export class NotificationService {
       }
 
       // Commit batch and send push notifications
-      await Promise.all([
-        batch.commit(),
-        ...pushNotificationPromises
-      ]);
+      const promises: Promise<any>[] = [...pushNotificationPromises];
+
+      // Only commit batch if there are in-app notifications to create
+      if (notification.deliveryMethod === 'in_app_only' || notification.deliveryMethod === 'both' || !notification.deliveryMethod) {
+        promises.unshift(batch.commit());
+      }
+
+      await Promise.all(promises);
 
       // Update notification status
       await updateDoc(notificationRef, {
@@ -500,33 +550,85 @@ export class NotificationService {
     }
   }
 
+  // Get user document for debugging
+  static async getUserDoc(userId: string) {
+    try {
+      return await getDoc(doc(db, this.MOBILE_USERS_COLLECTION, userId));
+    } catch (error) {
+      console.error('Error getting user doc:', error);
+      return null;
+    }
+  }
+
   // Send push notification to individual user
   private static async sendPushNotification(user: MobileUser, notification: Notification): Promise<void> {
     try {
+      console.log(`🔔 [DEBUG] Starting push notification for user: ${user.name} (${user.uid})`);
+
       // Get user's FCM token from Firestore
       const userDoc = await getDoc(doc(db, this.MOBILE_USERS_COLLECTION, user.uid));
-      const userData = userDoc.data();
-      const fcmToken = userData?.fcmToken;
 
-      if (!fcmToken) {
-        console.log(`📱 No FCM token found for user ${user.uid} (${user.name})`);
+      if (!userDoc.exists()) {
+        console.error(`❌ [DEBUG] User document not found in Firestore: ${user.uid}`);
         return;
       }
 
-      // Prepare FCM message
-      const message = {
-        notification: {
-          title: notification.title,
-          body: notification.body,
-          image: notification.imageUrl || undefined,
-        },
-        data: {
-          notificationId: notification.id,
-          actionType: notification.actionType || 'general',
-          actionUrl: notification.actionUrl || '',
-          priority: notification.priority || 'normal',
-          category: notification.category || 'general',
-        },
+      const userData = userDoc.data();
+      const fcmToken = userData?.fcmToken;
+
+      console.log(`🔍 [DEBUG] User data found:`, {
+        hasUserData: !!userData,
+        hasFcmToken: !!fcmToken,
+        fcmTokenLength: fcmToken?.length || 0,
+        fcmTokenPreview: fcmToken ? `${fcmToken.substring(0, 20)}...` : 'none',
+        userDataKeys: Object.keys(userData || {})
+      });
+
+      if (!fcmToken) {
+        console.warn(`⚠️ [DEBUG] No FCM token found for user ${user.uid} (${user.name})`);
+        console.log(`🔍 [DEBUG] Available user data keys:`, Object.keys(userData || {}));
+        console.log(`💡 [DEBUG] User needs to log into mobile app to generate FCM token`);
+        return;
+      }
+
+      if (typeof fcmToken !== 'string' || fcmToken.trim() === '') {
+        console.warn(`⚠️ [DEBUG] Invalid FCM token for user ${user.uid}: token is empty or not a string`);
+        return;
+      }
+
+      // Prepare FCM message with proper structure
+      // Build notification object - only include image if it exists
+      const notificationObj: any = {
+        title: notification.title,
+        body: notification.body,
+      };
+
+      // Only add image if it has a value
+      const imageUrl = notification.testImageUrl || notification.imageUrl;
+      if (imageUrl) {
+        notificationObj.image = imageUrl;
+      }
+
+      // Build data object - all values must be strings for FCM
+      const dataObj: any = {
+        notificationId: notification.id,
+        actionType: notification.actionType || 'general',
+        actionUrl: notification.actionUrl || '',
+        quizId: notification.quizId || '', // Include quiz ID for direct navigation
+        priority: notification.priority || 'normal',
+        category: notification.category || 'general',
+        deliveryMethod: notification.deliveryMethod || 'both',
+      };
+
+      // Only add testImageUrl if it exists
+      if (notification.testImageUrl) {
+        dataObj.testImageUrl = notification.testImageUrl;
+      }
+
+      // Build the complete message object
+      const message: any = {
+        notification: notificationObj,
+        data: dataObj,
         token: fcmToken,
         android: {
           notification: {
@@ -535,7 +637,7 @@ export class NotificationService {
             sound: 'default',
             channelId: 'mcq_notifications',
           },
-          priority: 'high' as const,
+          priority: 'high',
         },
         apns: {
           payload: {
@@ -551,12 +653,28 @@ export class NotificationService {
         },
       };
 
-      console.log(`📤 Sending push notification to: ${user.name}`);
+      console.log(`📤 [DEBUG] Sending push notification to: ${user.name}`);
+      console.log(`🔍 [DEBUG] FCM Message structure:`, {
+        title: message.notification.title,
+        body: message.notification.body,
+        hasImage: !!message.notification.image,
+        tokenPreview: message.token.substring(0, 20) + '...',
+        dataKeys: Object.keys(message.data),
+        hasAndroid: !!message.android,
+        hasApns: !!message.apns
+      });
+
+      // Log the complete message for debugging (without sensitive token)
+      const messageForLogging = {
+        ...message,
+        token: message.token.substring(0, 20) + '...'
+      };
+      console.log(`📋 [DEBUG] Complete FCM Message:`, JSON.stringify(messageForLogging, null, 2));
 
       // Send FCM message (handles CORS gracefully)
       await this.sendFCMMessage(message);
 
-      console.log(`✅ Push notification processed for ${user.name}`);
+      console.log(`✅ [DEBUG] Push notification processed for ${user.name}`);
     } catch (error) {
       console.error(`❌ Error sending push notification to ${user.uid}:`, error);
       // Don't throw - let the notification creation continue
@@ -566,15 +684,23 @@ export class NotificationService {
   // Send FCM message via Firebase Cloud Functions
   private static async sendFCMMessage(message: any): Promise<void> {
     try {
-      console.log('Attempting to send FCM message:', message.token?.substring(0, 20) + '...');
+      console.log(`🚀 [DEBUG] Attempting to send FCM message to token: ${message.token?.substring(0, 20)}...`);
 
       // Check if we should enable real FCM sending
       const enableRealFCM = process.env.REACT_APP_ENABLE_REAL_FCM === 'true';
+      const nodeEnv = process.env.NODE_ENV;
 
-      if (!enableRealFCM && process.env.NODE_ENV === 'development') {
-        console.warn('⚠️ FCM sending skipped in development mode');
-        console.log('📱 To enable real FCM, set REACT_APP_ENABLE_REAL_FCM=true in .env');
-        console.log('📱 Make sure Firebase Cloud Functions are deployed');
+      console.log(`🔍 [DEBUG] Environment check:`, {
+        NODE_ENV: nodeEnv,
+        REACT_APP_ENABLE_REAL_FCM: process.env.REACT_APP_ENABLE_REAL_FCM,
+        enableRealFCM: enableRealFCM,
+        willSendRealFCM: enableRealFCM || nodeEnv !== 'development'
+      });
+
+      if (!enableRealFCM && nodeEnv === 'development') {
+        console.warn('⚠️ [DEBUG] FCM sending skipped in development mode');
+        console.log('📱 [DEBUG] To enable real FCM, set REACT_APP_ENABLE_REAL_FCM=true in .env');
+        console.log('📱 [DEBUG] Make sure Firebase Cloud Functions are deployed');
 
         // Simulate successful sending for development
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -583,15 +709,26 @@ export class NotificationService {
       }
 
       // Send via Firebase Cloud Functions (no CORS issues)
-      console.log('📤 Sending FCM message via Cloud Functions...');
+      console.log('📤 [DEBUG] Sending FCM message via Cloud Functions...');
 
       // Get the Cloud Functions URL
-      const functionsUrl = process.env.NODE_ENV === 'development' && process.env.REACT_APP_USE_EMULATOR === 'true'
+      const useEmulator = process.env.REACT_APP_USE_EMULATOR === 'true';
+      const functionsUrl = nodeEnv === 'development' && useEmulator
         ? 'http://127.0.0.1:5001/mcq-quiz-system/us-central1/api'  // Local emulator
         : process.env.REACT_APP_FUNCTIONS_URL ||
           'https://us-central1-mcq-quiz-system.cloudfunctions.net/api';  // Production
 
-      const response = await fetch(`${functionsUrl}/api/notifications/send-fcm`, {
+      const fullUrl = `${functionsUrl}/notifications/send-fcm`;
+
+      console.log(`🔍 [DEBUG] FCM Request details:`, {
+        functionsUrl,
+        fullUrl,
+        useEmulator,
+        messageTitle: message.notification.title,
+        tokenPreview: message.token.substring(0, 20) + '...'
+      });
+
+      const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -601,13 +738,40 @@ export class NotificationService {
         }),
       });
 
+      console.log(`🔍 [DEBUG] FCM Response:`, {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+
       if (!response.ok) {
-        const errorText = await response.text();
+        let errorText = '';
+        try {
+          errorText = await response.text();
+        } catch (e) {
+          errorText = 'Could not read error response';
+        }
+
+        console.error(`❌ [DEBUG] Cloud Functions error:`, {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText,
+          url: fullUrl
+        });
+
+        // Try to parse JSON error response
+        try {
+          const errorJson = JSON.parse(errorText);
+          console.error('📋 [DEBUG] Parsed error response:', errorJson);
+        } catch (e) {
+          // Not JSON, that's ok
+        }
+
         throw new Error(`Cloud Functions error: ${response.status} - ${errorText}`);
       }
 
       const result = await response.json();
-      console.log('✅ FCM message sent successfully via Cloud Functions:', result);
+      console.log('✅ [DEBUG] FCM message sent successfully via Cloud Functions:', result);
 
     } catch (error) {
       console.error('❌ Error sending FCM message:', error);

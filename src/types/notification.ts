@@ -10,7 +10,9 @@ export interface NotificationContent {
   body: string;
   imageUrl?: string;
   actionUrl?: string;
-  actionType?: 'quiz' | 'exam' | 'news' | 'general';
+  actionType?: 'quiz' | 'exam' | 'news' | 'general' | 'test';
+  testImageUrl?: string; // For test-related notifications with image links
+  quizId?: string; // Quiz ID for direct navigation
 }
 
 export interface Notification {
@@ -19,7 +21,9 @@ export interface Notification {
   body: string;
   imageUrl?: string;
   actionUrl?: string;
-  actionType?: 'quiz' | 'exam' | 'news' | 'general';
+  actionType?: 'quiz' | 'exam' | 'news' | 'general' | 'test';
+  testImageUrl?: string; // For test-related notifications with image links
+  quizId?: string; // Quiz ID for direct navigation
   target: NotificationTarget;
   status: 'draft' | 'sending' | 'sent' | 'failed';
   sentCount: number;
@@ -29,7 +33,8 @@ export interface Notification {
   sentAt?: Date;
   scheduledFor?: Date;
   priority: 'low' | 'normal' | 'high' | 'urgent';
-  category: 'announcement' | 'quiz_update' | 'exam_alert' | 'general' | 'system';
+  category: 'announcement' | 'quiz_update' | 'exam_alert' | 'general' | 'system' | 'test_alert';
+  deliveryMethod: 'push_only' | 'in_app_only' | 'both'; // New delivery method options
 }
 
 export interface NotificationRecipient {

@@ -69,4 +69,4 @@ router.post('/', async (req, res) => {
   }
 });
 
-export { router as questionRoutes };
+export const questionRoutes = router;

@@ -29,6 +29,10 @@ import {
   AdminPanelSettings as AdminIcon,
   Notifications as NotificationsIcon,
   People as PeopleIcon,
+  Feedback as FeedbackIcon,
+  MenuBook as ExamHubIcon,
+  Payment as PaymentIcon,
+  CardGiftcard as GiftIcon,
 } from '@mui/icons-material';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -130,6 +134,13 @@ const DashboardPage: React.FC = () => {
       color: '#F59E0B',
     },
     {
+      title: 'Feedback Management',
+      description: 'View and manage user feedback from quiz results',
+      icon: <FeedbackIcon />,
+      path: '/feedback',
+      color: '#8B5CF6',
+    },
+    {
       title: 'Bulk Upload',
       description: 'Upload questions in bulk from files',
       icon: <UploadIcon />,
@@ -164,6 +175,27 @@ const DashboardPage: React.FC = () => {
       path: '/notifications',
       color: '#FF5722',
     }, // Updated: v1.0.2 - Notification Management Card
+    {
+      title: 'Exam Hub',
+      description: 'Manage news, tips, previous year papers, and results',
+      icon: <ExamHubIcon />,
+      path: '/exam-hub',
+      color: '#3F51B5',
+    },
+    {
+      title: 'Payment Management',
+      description: 'View payment transactions, user payments, and revenue analytics',
+      icon: <PaymentIcon />,
+      path: '/payments',
+      color: '#00BCD4',
+    },
+    {
+      title: 'Free Quiz Access',
+      description: 'Grant free access to paid quizzes for specific users',
+      icon: <GiftIcon />,
+      path: '/free-quiz-access',
+      color: '#FF6B6B',
+    },
   ];
 
   const testCards = [

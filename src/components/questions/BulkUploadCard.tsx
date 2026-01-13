@@ -66,6 +66,9 @@ interface BulkUploadData {
   questions: Question[];
   createLiveTest?: boolean;
   liveTestData?: LiveTestData;
+  price: number;
+  currency: string;
+  isFree: boolean;
 }
 
 interface ExamType {
@@ -88,6 +91,9 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
     examType: '',
     timeLimit: 30,
     suitableFor: [] as string[],
+    price: 0,
+    currency: 'INR',
+    isFree: true,
   });
   const [parsedQuestions, setParsedQuestions] = useState<Question[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -226,6 +232,9 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
       examType: '',
       timeLimit: 30,
       suitableFor: [],
+      price: 0,
+      currency: 'INR',
+      isFree: true,
     });
     setParsedQuestions([]);
     setShowPreview(false);
@@ -447,6 +456,64 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
                     ))}
                   </Select>
                 </FormControl>
+              </Grid>
+
+              {/* Price Configuration */}
+              <Grid item xs={12}>
+                <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f0f8ff' }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={examConfig.isFree}
+                        onChange={(e) => setExamConfig({ ...examConfig, isFree: e.target.checked, price: e.target.checked ? 0 : examConfig.price })}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                          💰 Pricing Configuration
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {examConfig.isFree ? 'This exam will be free for all users' : 'This exam requires payment to access'}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+
+                  {!examConfig.isFree && (
+                    <Box sx={{ mt: 2 }}>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            type="number"
+                            label="Price"
+                            value={examConfig.price}
+                            onChange={(e) => setExamConfig({ ...examConfig, price: parseFloat(e.target.value) || 0 })}
+                            inputProps={{ min: 0, step: 0.01 }}
+                            size="small"
+                            required={!examConfig.isFree}
+                          />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Currency</InputLabel>
+                            <Select
+                              value={examConfig.currency}
+                              label="Currency"
+                              onChange={(e) => setExamConfig({ ...examConfig, currency: e.target.value })}
+                            >
+                              <MenuItem value="INR">INR (₹)</MenuItem>
+                              <MenuItem value="USD">USD ($)</MenuItem>
+                              <MenuItem value="EUR">EUR (€)</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  )}
+                </Box>
               </Grid>
 
               {/* Live Test Option */}

@@ -12,6 +12,7 @@ import { quizRoutes } from './routes/quiz';
 import { analyticsRoutes } from './routes/analytics';
 import { userRoutes } from './routes/users';
 import { notificationRoutes } from './routes/notifications';
+import { fcmCleanupRoutes } from './routes/fcm-cleanup';
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -27,18 +28,19 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Use routes
-app.use('/api/auth', authRoutes);
-app.use('/api/questions', questionRoutes);
-app.use('/api/quiz', quizRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use('/auth', authRoutes);
+app.use('/questions', questionRoutes);
+app.use('/quiz', quizRoutes);
+app.use('/analytics', analyticsRoutes);
+app.use('/users', userRoutes);
+app.use('/notifications', notificationRoutes);
+app.use('/fcm-cleanup', fcmCleanupRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString() 
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -135,7 +137,7 @@ export const onQuestionCreate = functions.firestore
   .onCreate(async (snapshot, context) => {
     try {
       const question = snapshot.data();
-      
+
       // Update category question count
       if (question.category) {
         const categoryRef = admin.firestore().collection('categories').doc(question.category);
@@ -146,6 +148,29 @@ export const onQuestionCreate = functions.firestore
       }
     } catch (error) {
       console.error('Error updating category count:', error);
+    }
+  });
+
+// Trigger when feedback is updated with admin response
+export const onFeedbackResponse = functions.firestore
+  .document('feedback/{feedbackId}')
+  .onUpdate(async (change, context) => {
+    try {
+      const beforeData = change.before.data();
+      const afterData = change.after.data();
+
+      // Check if admin response was added
+      const wasResponded = !beforeData.adminResponse && afterData.adminResponse;
+      const statusChanged = beforeData.status !== 'responded' && afterData.status === 'responded';
+
+      if (wasResponded && statusChanged) {
+        console.log(`Admin responded to feedback ${context.params.feedbackId}`);
+
+        // Create notification for the user
+        await createFeedbackResponseNotification(afterData, context.params.feedbackId);
+      }
+    } catch (error) {
+      console.error('Error processing feedback response:', error);
     }
   });
 
@@ -354,13 +379,13 @@ function calculateCategoryStats(results: any[]) {
 
 function calculatePopularQuestions(results: any[]) {
   const questionMap = new Map();
-  
+
   results.forEach(result => {
     result.questionAnalysis?.forEach((qa: any) => {
       if (!questionMap.has(qa.questionId)) {
         questionMap.set(qa.questionId, { attempts: 0, correctAttempts: 0 });
       }
-      
+
       const stats = questionMap.get(qa.questionId);
       stats.attempts += 1;
       if (qa.isCorrect) {
@@ -368,10 +393,140 @@ function calculatePopularQuestions(results: any[]) {
       }
     });
   });
-  
+
   return Array.from(questionMap.entries()).map(([questionId, stats]) => ({
     questionId,
     attempts: stats.attempts,
     correctRate: stats.correctAttempts / stats.attempts
   }));
+}
+
+async function createFeedbackResponseNotification(feedbackData: any, feedbackId: string) {
+  try {
+    console.log(`Creating notification for feedback response: ${feedbackId}`);
+
+    // Get user's FCM token
+    const userDoc = await admin.firestore().collection('users').doc(feedbackData.userId).get();
+    if (!userDoc.exists) {
+      console.log(`User ${feedbackData.userId} not found`);
+      return;
+    }
+
+    const userData = userDoc.data()!;
+
+    // Create notification content
+    const notificationData = {
+      title: 'Admin Response to Your Feedback',
+      body: `We've responded to your feedback about "${feedbackData.examName}". Check it out!`,
+      imageUrl: null,
+      actionUrl: `/feedback/${feedbackId}`,
+      actionType: 'navigate',
+      target: {
+        type: 'specific_users',
+        userIds: [feedbackData.userId]
+      },
+      status: 'sent',
+      sentCount: 1,
+      totalTargets: 1,
+      createdBy: 'system',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      priority: 'normal',
+      category: 'feedback_response',
+      metadata: {
+        feedbackId: feedbackId,
+        examId: feedbackData.examId,
+        examName: feedbackData.examName,
+        adminResponse: feedbackData.adminResponse?.substring(0, 100) + '...'
+      }
+    };
+
+    // Save notification to Firestore
+    const notificationRef = await admin.firestore()
+      .collection('notifications')
+      .add(notificationData);
+
+    // Create notification recipient record
+    const recipientData = {
+      notificationId: notificationRef.id,
+      userId: feedbackData.userId,
+      status: 'sent',
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      metadata: {
+        feedbackId: feedbackId,
+        examName: feedbackData.examName
+      }
+    };
+
+    await admin.firestore()
+      .collection('notification_recipients')
+      .add(recipientData);
+
+    // Send FCM notification if user has token
+    if (userData.fcmToken) {
+      const message = {
+        token: userData.fcmToken,
+        notification: {
+          title: notificationData.title,
+          body: notificationData.body,
+        },
+        data: {
+          type: 'feedback_response',
+          feedbackId: feedbackId,
+          examId: feedbackData.examId,
+          actionUrl: notificationData.actionUrl
+        },
+        android: {
+          notification: {
+            icon: 'ic_notification',
+            color: '#1976D2',
+            sound: 'default',
+            channelId: 'mcq_notifications',
+          },
+          priority: 'high' as const,
+        },
+        apns: {
+          payload: {
+            aps: {
+              alert: {
+                title: notificationData.title,
+                body: notificationData.body
+              },
+              badge: 1,
+              sound: 'default',
+            },
+          },
+        },
+      };
+
+      try {
+        const response = await admin.messaging().send(message);
+        console.log(`FCM notification sent successfully: ${response}`);
+
+        // Update recipient status to delivered
+        await admin.firestore()
+          .collection('notification_recipients')
+          .where('notificationId', '==', notificationRef.id)
+          .where('userId', '==', feedbackData.userId)
+          .get()
+          .then(snapshot => {
+            if (!snapshot.empty) {
+              snapshot.docs[0].ref.update({
+                status: 'delivered',
+                deliveredAt: admin.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          });
+      } catch (fcmError) {
+        console.error('Error sending FCM notification:', fcmError);
+        // Keep the notification record even if FCM fails
+      }
+    } else {
+      console.log(`User ${feedbackData.userId} has no FCM token`);
+    }
+
+    console.log(`Feedback response notification created successfully for user ${feedbackData.userId}`);
+  } catch (error) {
+    console.error('Error creating feedback response notification:', error);
+  }
 }

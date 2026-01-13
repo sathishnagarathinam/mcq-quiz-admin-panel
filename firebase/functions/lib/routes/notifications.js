@@ -37,43 +37,83 @@ exports.notificationRoutes = void 0;
 const express_1 = require("express");
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-exports.notificationRoutes = router;
 // Send FCM notification
 router.post('/send-fcm', async (req, res) => {
+    var _a;
     try {
         const { message } = req.body;
-        if (!message || !message.token) {
+        console.log('📨 [FCM] Received send-fcm request');
+        console.log('📨 [FCM] Message structure:', {
+            hasNotification: !!(message === null || message === void 0 ? void 0 : message.notification),
+            hasData: !!(message === null || message === void 0 ? void 0 : message.data),
+            hasToken: !!(message === null || message === void 0 ? void 0 : message.token),
+            tokenPreview: (message === null || message === void 0 ? void 0 : message.token) ? message.token.substring(0, 20) + '...' : 'none',
+            notificationTitle: (_a = message === null || message === void 0 ? void 0 : message.notification) === null || _a === void 0 ? void 0 : _a.title,
+            dataKeys: (message === null || message === void 0 ? void 0 : message.data) ? Object.keys(message.data) : []
+        });
+        if (!message) {
+            console.error('❌ [FCM] Missing message object');
             return res.status(400).json({
-                error: 'Invalid message format or missing token'
+                error: 'Invalid message format - message object is required',
+                code: 'MISSING_MESSAGE'
             });
         }
+        if (!message.token) {
+            console.error('❌ [FCM] Missing FCM token');
+            return res.status(400).json({
+                error: 'Invalid message format - token is required',
+                code: 'MISSING_TOKEN'
+            });
+        }
+        if (!message.notification || !message.notification.title || !message.notification.body) {
+            console.error('❌ [FCM] Missing notification title or body');
+            return res.status(400).json({
+                error: 'Invalid message format - notification title and body are required',
+                code: 'MISSING_NOTIFICATION'
+            });
+        }
+        console.log('📨 [FCM] Validation passed, sending message...');
         // Send the message using Firebase Admin SDK
         const response = await admin.messaging().send(message);
-        console.log('Successfully sent FCM message:', response);
+        console.log('✅ [FCM] Successfully sent FCM message:', response);
         return res.status(200).json({
             success: true,
             messageId: response
         });
     }
     catch (error) {
-        console.error('Error sending FCM message:', error);
+        console.error('❌ [FCM] Error sending FCM message:', error);
         // Handle specific FCM errors
         if (error instanceof Error) {
-            if (error.message.includes('registration-token-not-registered')) {
+            const errorMessage = error.message.toLowerCase();
+            if (errorMessage.includes('registration-token-not-registered')) {
+                console.error('❌ [FCM] Invalid or expired FCM token');
                 return res.status(400).json({
                     error: 'Invalid or expired FCM token',
-                    code: 'INVALID_TOKEN'
+                    code: 'INVALID_TOKEN',
+                    details: error.message
                 });
             }
-            if (error.message.includes('invalid-argument')) {
+            if (errorMessage.includes('invalid-argument')) {
+                console.error('❌ [FCM] Invalid message format');
                 return res.status(400).json({
                     error: 'Invalid message format',
-                    code: 'INVALID_MESSAGE'
+                    code: 'INVALID_MESSAGE',
+                    details: error.message
+                });
+            }
+            if (errorMessage.includes('authentication')) {
+                console.error('❌ [FCM] Authentication error');
+                return res.status(401).json({
+                    error: 'Authentication error - Firebase Admin SDK not properly initialized',
+                    code: 'AUTH_ERROR',
+                    details: error.message
                 });
             }
         }
         return res.status(500).json({
             error: 'Failed to send FCM message',
+            code: 'FCM_ERROR',
             details: error instanceof Error ? error.message : 'Unknown error'
         });
     }
@@ -229,4 +269,5 @@ router.post('/unsubscribe-from-topic', async (req, res) => {
         });
     }
 });
+exports.notificationRoutes = router;
 //# sourceMappingURL=notifications.js.map

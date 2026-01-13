@@ -42,9 +42,11 @@ const NotificationSenderPage: React.FC = () => {
   const [body, setBody] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [actionUrl, setActionUrl] = useState('');
-  const [actionType, setActionType] = useState<'quiz' | 'exam' | 'news' | 'general'>('general');
+  const [actionType, setActionType] = useState<'quiz' | 'exam' | 'news' | 'general' | 'test'>('general');
   const [priority, setPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
-  const [category, setCategory] = useState<'announcement' | 'quiz_update' | 'exam_alert' | 'general' | 'system'>('general');
+  const [category, setCategory] = useState<'announcement' | 'quiz_update' | 'exam_alert' | 'general' | 'system' | 'test_alert'>('general');
+  const [testImageUrl, setTestImageUrl] = useState('');
+  const [deliveryMethod, setDeliveryMethod] = useState<'push_only' | 'in_app_only' | 'both'>('both');
   
   // Target settings
   const [targetType, setTargetType] = useState<'all' | 'specific_users' | 'designation' | 'office'>('all');
@@ -112,9 +114,49 @@ const NotificationSenderPage: React.FC = () => {
     }
   };
 
+  const isValidUrl = (url: string): boolean => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const isValidImageUrl = (url: string): boolean => {
+    if (!isValidUrl(url)) return false;
+
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+    const urlLower = url.toLowerCase();
+
+    // Check if URL ends with image extension or contains image-related patterns
+    return imageExtensions.some(ext => urlLower.includes(ext)) ||
+           urlLower.includes('image') ||
+           urlLower.includes('img') ||
+           urlLower.includes('photo') ||
+           urlLower.includes('picture');
+  };
+
   const handleSendNotification = async () => {
     if (!title.trim() || !body.trim()) {
       toast.error('Please fill in title and message');
+      return;
+    }
+
+    // Validate image URLs if provided
+    if (imageUrl.trim() && !isValidImageUrl(imageUrl.trim())) {
+      toast.error('Please enter a valid image URL (jpg, png, gif, webp, svg)');
+      return;
+    }
+
+    if (testImageUrl.trim() && !isValidImageUrl(testImageUrl.trim())) {
+      toast.error('Please enter a valid test image URL (jpg, png, gif, webp, svg)');
+      return;
+    }
+
+    // Validate action URL if provided
+    if (actionUrl.trim() && !isValidUrl(actionUrl.trim())) {
+      toast.error('Please enter a valid action URL');
       return;
     }
 
@@ -139,6 +181,7 @@ const NotificationSenderPage: React.FC = () => {
         imageUrl: imageUrl.trim() !== '' ? imageUrl.trim() : undefined,
         actionUrl: actionUrl.trim() !== '' ? actionUrl.trim() : undefined,
         actionType: actionType !== 'general' ? actionType : undefined,
+        testImageUrl: testImageUrl.trim() !== '' ? testImageUrl.trim() : undefined,
       };
 
       const scheduledFor = isScheduled && scheduledDate && scheduledTime
@@ -153,6 +196,7 @@ const NotificationSenderPage: React.FC = () => {
           priority,
           category,
           scheduledFor,
+          deliveryMethod,
         }
       );
 
@@ -169,8 +213,10 @@ const NotificationSenderPage: React.FC = () => {
       setImageUrl('');
       setActionUrl('');
       setActionType('general');
+      setTestImageUrl('');
       setPriority('normal');
       setCategory('general');
+      setDeliveryMethod('both');
       setTargetType('all');
       setSelectedUsers([]);
       setSelectedDesignation('');
@@ -267,6 +313,20 @@ const NotificationSenderPage: React.FC = () => {
                 />
               </Grid>
 
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Test Image URL (Optional)"
+                  value={testImageUrl}
+                  onChange={(e) => setTestImageUrl(e.target.value)}
+                  placeholder="https://example.com/test-image.jpg"
+                  helperText="For test-related notifications, provide an image link that will be displayed with the notification"
+                  InputProps={{
+                    startAdornment: <ImageIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                  }}
+                />
+              </Grid>
+
               <Grid item xs={12} sm={6}>
                 <FormControl fullWidth>
                   <InputLabel>Action Type</InputLabel>
@@ -279,6 +339,7 @@ const NotificationSenderPage: React.FC = () => {
                     <MenuItem value="quiz">Quiz</MenuItem>
                     <MenuItem value="exam">Exam</MenuItem>
                     <MenuItem value="news">News</MenuItem>
+                    <MenuItem value="test">Test</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
@@ -312,6 +373,22 @@ const NotificationSenderPage: React.FC = () => {
                     <MenuItem value="quiz_update">Quiz Update</MenuItem>
                     <MenuItem value="exam_alert">Exam Alert</MenuItem>
                     <MenuItem value="system">System</MenuItem>
+                    <MenuItem value="test_alert">Test Alert</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Delivery Method</InputLabel>
+                  <Select
+                    value={deliveryMethod}
+                    onChange={(e) => setDeliveryMethod(e.target.value as any)}
+                    label="Delivery Method"
+                  >
+                    <MenuItem value="both">Push Notification + In-App</MenuItem>
+                    <MenuItem value="push_only">Push Notification Only</MenuItem>
+                    <MenuItem value="in_app_only">In-App Notification Only</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>

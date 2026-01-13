@@ -37,7 +37,6 @@ exports.userRoutes = void 0;
 const express_1 = require("express");
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-exports.userRoutes = router;
 // Get users with pagination
 router.get('/', async (req, res) => {
     try {
@@ -85,4 +84,5 @@ router.put('/:userId', async (req, res) => {
         });
     }
 });
+exports.userRoutes = router;
 //# sourceMappingURL=users.js.map

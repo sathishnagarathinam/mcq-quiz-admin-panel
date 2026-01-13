@@ -37,7 +37,6 @@ exports.authRoutes = void 0;
 const express_1 = require("express");
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-exports.authRoutes = router;
 // Verify ID token
 router.post('/verify-token', async (req, res) => {
     try {
@@ -85,4 +84,5 @@ router.post('/create-custom-token', async (req, res) => {
         });
     }
 });
+exports.authRoutes = router;
 //# sourceMappingURL=auth.js.map

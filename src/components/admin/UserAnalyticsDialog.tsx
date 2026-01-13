@@ -55,7 +55,13 @@ interface UserAnalytics {
     bestTime: number;
     averageTime: number;
     categoryScores: Record<string, number>;
-    recentScores: Array<{ score: number; date: Date; examType: string }>;
+    recentScores: Array<{
+      score: number;
+      date: Date;
+      examType: string;
+      quizName: string;
+      performance: string;
+    }>;
   };
   activity: {
     loginCount: number;
@@ -196,12 +202,47 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
       categoryScores[category] = scores.reduce((sum, score) => sum + score, 0) / scores.length;
     });
 
-    // Recent scores (last 5)
-    const recentScores = sortedAttempts.slice(0, 5).map((attempt: any) => ({
-      score: attempt.scorePercentage || 0,
-      date: new Date(attempt.completedAt?.toDate?.() || attempt.completedAt),
-      examType: attempt.examCategory || attempt.category || 'Quiz'
-    }));
+    // Recent scores (last 5) with enhanced data
+    const recentScores = await Promise.all(
+      sortedAttempts.slice(0, 5).map(async (attempt: any) => {
+        const score = attempt.scorePercentage || 0;
+        let quizName = 'Unknown Quiz';
+        let examType = attempt.examCategory || attempt.category || 'Quiz';
+
+        // Try to get quiz name from exam collection
+        try {
+          if (attempt.examId) {
+            const examQuery = query(
+              collection(db, 'exams'),
+              where('__name__', '==', attempt.examId)
+            );
+            const examSnapshot = await getDocs(examQuery);
+            if (!examSnapshot.empty) {
+              const examData = examSnapshot.docs[0].data();
+              quizName = examData.name || examData.title || 'Unknown Quiz';
+              examType = examData.examType || examData.category || examType;
+            }
+          }
+        } catch (error) {
+          console.warn('Could not fetch exam details for attempt:', attempt.examId);
+        }
+
+        // Calculate performance label
+        const performance = score >= 90 ? 'Excellent' :
+                          score >= 80 ? 'Very Good' :
+                          score >= 70 ? 'Good' :
+                          score >= 60 ? 'Average' :
+                          score >= 50 ? 'Below Average' : 'Needs Improvement';
+
+        return {
+          score,
+          date: new Date(attempt.completedAt?.toDate?.() || attempt.completedAt),
+          examType,
+          quizName,
+          performance
+        };
+      })
+    );
 
     // Activity level calculation
     let activityLevel: 'Very Active' | 'Active' | 'Moderate' | 'Inactive' = 'Inactive';
@@ -312,9 +353,41 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
             'Current Affairs': 72.1,
           },
           recentScores: [
-            { score: 85, date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), examType: 'Postal Guide' },
-            { score: 78, date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), examType: 'Postal Volumes' },
-            { score: 92, date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), examType: 'General Knowledge' },
+            {
+              score: 85,
+              date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+              examType: 'Postal Guide',
+              quizName: 'Postal Guide Chapter 1 - Basic Concepts',
+              performance: 'Very Good'
+            },
+            {
+              score: 78,
+              date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+              examType: 'Postal Volumes',
+              quizName: 'Postal Volumes and Calculations',
+              performance: 'Good'
+            },
+            {
+              score: 92,
+              date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+              examType: 'General Knowledge',
+              quizName: 'Current Affairs and GK Quiz',
+              performance: 'Excellent'
+            },
+            {
+              score: 67,
+              date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+              examType: 'Postal Guide',
+              quizName: 'Postal Guide Chapter 2 - Advanced Topics',
+              performance: 'Average'
+            },
+            {
+              score: 88,
+              date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
+              examType: 'Current Affairs',
+              quizName: 'Monthly Current Affairs Test',
+              performance: 'Very Good'
+            },
           ],
         },
         activity: {
@@ -620,36 +693,81 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
           <Typography variant="h6" gutterBottom>
             📈 Recent Quiz Performance
           </Typography>
-          <TableContainer component={Paper}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>Exam Type</TableCell>
-                  <TableCell align="right">Score</TableCell>
-                  <TableCell align="right">Performance</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {analytics.performance.recentScores.map((score, index) => (
-                  <TableRow key={index}>
-                    <TableCell>
-                      {score.date.toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>{score.examType}</TableCell>
-                    <TableCell align="right">{score.score}%</TableCell>
-                    <TableCell align="right">
-                      <Chip
-                        label={score.score >= 80 ? 'Excellent' : score.score >= 60 ? 'Good' : 'Needs Improvement'}
-                        color={score.score >= 80 ? 'success' : score.score >= 60 ? 'warning' : 'error'}
-                        size="small"
-                      />
-                    </TableCell>
+          {analytics.performance.recentScores.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Quiz sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No Recent Quiz Activity
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                This user hasn't taken any quizzes recently.
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>Quiz Name</TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>Exam Type</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Score</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Performance</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                </TableHead>
+                <TableBody>
+                  {analytics.performance.recentScores.map((score, index) => (
+                    <TableRow
+                      key={index}
+                      sx={{
+                        '&:hover': { backgroundColor: 'action.hover' },
+                        '&:nth-of-type(odd)': { backgroundColor: 'action.selected' }
+                      }}
+                    >
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="medium">
+                          {score.date.toLocaleDateString()}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {score.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="medium" sx={{ maxWidth: 200 }}>
+                          {score.quizName}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={score.examType}
+                          size="small"
+                          variant="outlined"
+                          color="primary"
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography
+                          variant="body2"
+                          fontWeight="bold"
+                          color={score.score >= 80 ? 'success.main' : score.score >= 60 ? 'warning.main' : 'error.main'}
+                        >
+                          {score.score}%
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Chip
+                          label={score.performance}
+                          color={score.score >= 80 ? 'success' : score.score >= 60 ? 'warning' : 'error'}
+                          size="small"
+                          variant="filled"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
         </Box>
       </DialogContent>
       

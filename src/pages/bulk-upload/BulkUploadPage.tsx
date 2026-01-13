@@ -45,6 +45,9 @@ interface BulkUploadData {
   questions: Question[];
   createLiveTest?: boolean;
   liveTestData?: LiveTestData;
+  price: number;
+  currency: string;
+  isFree: boolean;
 }
 
 interface ExamType {
@@ -128,6 +131,9 @@ const BulkUploadPage: React.FC = () => {
         timeLimit: data.timeLimit,
         suitableFor: data.suitableFor,
         questions: data.questions,
+        price: data.isFree ? 0 : data.price,
+        currency: data.currency,
+        isFree: data.isFree,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
         isActive: true,

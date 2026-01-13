@@ -79,13 +79,25 @@ const UserManagement: React.FC = () => {
           email: userData.email,
           name: userData.name,
           status: userData.status,
-          isActive: userData.isActive
+          isActive: userData.isActive,
+          role: userData.role
         });
 
-        usersList.push({
+        // Ensure required fields have default values
+        const safeUserData: PendingUser = {
           uid: doc.id,
-          ...userData,
-        });
+          email: userData.email || '',
+          name: userData.name || 'Unknown User',
+          role: userData.role || 'admin',
+          createdAt: userData.createdAt || null,
+          isActive: userData.isActive ?? false,
+          status: userData.status || 'pending',
+          approvedBy: userData.approvedBy,
+          approvedAt: userData.approvedAt,
+          lastLogin: userData.lastLogin,
+        };
+
+        usersList.push(safeUserData);
       });
 
       // Sort by creation date (newest first)
@@ -311,15 +323,15 @@ const UserManagement: React.FC = () => {
                   <TableRow key={user.uid}>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {getRoleIcon(user.role)}
-                        {user.name}
+                        {getRoleIcon(user.role || 'unknown')}
+                        {user.name || 'Unknown User'}
                       </Box>
                     </TableCell>
-                    <TableCell>{user.email}</TableCell>
+                    <TableCell>{user.email || 'No email'}</TableCell>
                     <TableCell>
                       <Chip
-                        label={user.role.replace('_', ' ').toUpperCase()}
-                        color={getRoleColor(user.role) as any}
+                        label={(user.role || 'unknown').replace('_', ' ').toUpperCase()}
+                        color={getRoleColor(user.role || 'unknown') as any}
                         size="small"
                       />
                     </TableCell>

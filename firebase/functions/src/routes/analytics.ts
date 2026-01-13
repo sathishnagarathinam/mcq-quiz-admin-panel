@@ -42,4 +42,4 @@ router.get('/', async (req, res) => {
   }
 });
 
-export { router as analyticsRoutes };
+export const analyticsRoutes = router;

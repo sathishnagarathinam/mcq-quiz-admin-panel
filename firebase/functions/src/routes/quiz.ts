@@ -62,4 +62,4 @@ router.post('/submit', async (req, res) => {
   }
 });
 
-export { router as quizRoutes };
+export const quizRoutes = router;

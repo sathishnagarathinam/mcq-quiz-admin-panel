@@ -65,4 +65,4 @@ router.put('/:userId', async (req, res) => {
   }
 });
 
-export { router as userRoutes };
+export const userRoutes = router;

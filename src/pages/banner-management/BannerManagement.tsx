@@ -328,6 +328,20 @@ const BannerManagement: React.FC = () => {
       return;
     }
 
+    // Validate discount format if provided
+    if (formData.discount.trim()) {
+      const discountStr = formData.discount.trim().replace('%', '').trim();
+      const discountNum = parseFloat(discountStr);
+
+      if (isNaN(discountNum) || discountNum < 0 || discountNum > 100) {
+        setError('Discount must be a number between 0 and 100 (e.g., "30" or "30%")');
+        return;
+      }
+
+      // Format discount to ensure it has % sign
+      formData.discount = `${discountNum}%`;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -552,9 +566,19 @@ const BannerManagement: React.FC = () => {
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="Discount (e.g., 30%)"
+                  label="Discount (e.g., 30 or 30%)"
                   value={formData.discount}
-                  onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
+                  onChange={(e) => {
+                    let value = e.target.value.trim();
+                    // Remove % if user types it
+                    value = value.replace('%', '').trim();
+                    // Only allow numbers and decimal point
+                    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                      setFormData({ ...formData, discount: value });
+                    }
+                  }}
+                  placeholder="0-100"
+                  helperText="Enter discount percentage (0-100)"
                 />
               </Grid>
               <Grid item xs={12} sm={8}>

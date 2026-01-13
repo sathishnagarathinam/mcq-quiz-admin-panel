@@ -61,7 +61,11 @@ const NotificationTestPage: React.FC = () => {
     setTestResults(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
   };
 
-  const sendTestNotification = async (targetType: 'all' | 'designation' | 'office') => {
+  const sendTestNotification = async (
+    targetType: 'all' | 'designation' | 'office',
+    deliveryMethod: 'push_only' | 'in_app_only' | 'both' = 'both',
+    includeTestImage: boolean = false
+  ) => {
     if (!adminUser) {
       toast.error('Admin user not found');
       return;
@@ -69,7 +73,8 @@ const NotificationTestPage: React.FC = () => {
 
     try {
       setLoading(true);
-      addTestResult(`🚀 Starting test notification for ${targetType}...`);
+      addTestResult(`🚀 Starting test notification for ${targetType} with delivery method: ${deliveryMethod}...`);
+      addTestResult(`📋 Test image included: ${includeTestImage ? 'Yes' : 'No'}`);
 
       let target;
       let title;
@@ -102,9 +107,10 @@ const NotificationTestPage: React.FC = () => {
       }
 
       const content = {
-        title,
-        body,
-        actionType: 'general' as const,
+        title: `${title} (${deliveryMethod.replace('_', ' ').toUpperCase()})`,
+        body: `${body} Delivery method: ${deliveryMethod.replace('_', ' ')}`,
+        actionType: includeTestImage ? 'test' as const : 'general' as const,
+        testImageUrl: includeTestImage ? 'https://via.placeholder.com/400x200/4CAF50/white?text=Test+Image' : undefined,
       };
 
       // Create notification
@@ -114,15 +120,28 @@ const NotificationTestPage: React.FC = () => {
         adminUser.uid,
         {
           priority: 'normal',
-          category: 'general',
+          category: includeTestImage ? 'test_alert' : 'general',
+          deliveryMethod,
         }
       );
 
       addTestResult(`✅ Created notification with ID: ${notificationId}`);
+      addTestResult(`📤 Delivery method set to: ${deliveryMethod}`);
 
       // Send notification
       await NotificationService.sendNotification(notificationId);
       addTestResult(`✅ Notification sent successfully!`);
+
+      // Add specific feedback based on delivery method
+      if (deliveryMethod === 'push_only') {
+        addTestResult(`📱 Push notifications sent - check your mobile device`);
+        addTestResult(`ℹ️ No in-app notifications created (push only mode)`);
+      } else if (deliveryMethod === 'in_app_only') {
+        addTestResult(`📋 In-app notifications created - check the mobile app`);
+        addTestResult(`ℹ️ No push notifications sent (in-app only mode)`);
+      } else {
+        addTestResult(`📱📋 Both push and in-app notifications sent`);
+      }
 
       toast.success('Test notification sent successfully!');
     } catch (error) {
@@ -136,6 +155,119 @@ const NotificationTestPage: React.FC = () => {
 
   const clearResults = () => {
     setTestResults([]);
+  };
+
+  const debugEnvironment = () => {
+    addTestResult('🔍 Environment Debug Information:');
+    addTestResult(`NODE_ENV: ${process.env.NODE_ENV}`);
+    addTestResult(`REACT_APP_ENABLE_REAL_FCM: ${process.env.REACT_APP_ENABLE_REAL_FCM}`);
+    addTestResult(`REACT_APP_USE_EMULATOR: ${process.env.REACT_APP_USE_EMULATOR}`);
+    addTestResult(`REACT_APP_FUNCTIONS_URL: ${process.env.REACT_APP_FUNCTIONS_URL || 'not set'}`);
+
+    const willSendRealFCM = process.env.REACT_APP_ENABLE_REAL_FCM === 'true' || process.env.NODE_ENV !== 'development';
+    addTestResult(`Will send real FCM: ${willSendRealFCM ? 'YES' : 'NO'}`);
+
+    if (!willSendRealFCM) {
+      addTestResult('⚠️ FCM is in simulation mode. To enable real push notifications:');
+      addTestResult('1. Set REACT_APP_ENABLE_REAL_FCM=true in your .env file');
+      addTestResult('2. Make sure Firebase Cloud Functions are deployed');
+      addTestResult('3. Restart the development server');
+    }
+  };
+
+  const checkFCMTokens = async () => {
+    try {
+      addTestResult('🔍 Checking FCM tokens for ALL mobile users...');
+      const users = await NotificationService.getMobileUsers();
+
+      addTestResult(`📊 Total active users found: ${users.length}`);
+
+      let usersWithTokens = 0;
+      let usersWithoutTokens = 0;
+      const usersWithTokensList: string[] = [];
+      const usersWithoutTokensList: string[] = [];
+
+      // Check ALL users, not just first 5
+      for (const user of users) {
+        try {
+          const userDoc = await NotificationService.getUserDoc(user.uid);
+          const userData = userDoc?.data();
+          const fcmToken = userData?.fcmToken;
+
+          if (fcmToken) {
+            usersWithTokens++;
+            usersWithTokensList.push(`${user.name} (${user.email})`);
+            // Only show first 5 with tokens in detail
+            if (usersWithTokens <= 5) {
+              addTestResult(`✅ ${user.name}: Has FCM token (${fcmToken.substring(0, 20)}...)`);
+            }
+          } else {
+            usersWithoutTokens++;
+            usersWithoutTokensList.push(`${user.name} (${user.email})`);
+            // Only show first 5 without tokens in detail
+            if (usersWithoutTokens <= 5) {
+              addTestResult(`❌ ${user.name}: No FCM token found`);
+            }
+          }
+        } catch (error) {
+          addTestResult(`❌ ${user.name}: Error checking token - ${error}`);
+        }
+      }
+
+      addTestResult(`\n📊 SUMMARY:`);
+      addTestResult(`✅ Users WITH FCM tokens: ${usersWithTokens}`);
+      addTestResult(`❌ Users WITHOUT FCM tokens: ${usersWithoutTokens}`);
+      addTestResult(`📈 Total users checked: ${users.length}`);
+      addTestResult(`📊 FCM Token coverage: ${((usersWithTokens / users.length) * 100).toFixed(1)}%`);
+
+      if (usersWithoutTokens > 0) {
+        addTestResult(`\n⚠️ ${usersWithoutTokens} users without FCM tokens will not receive push notifications`);
+        addTestResult('💡 These users need to log into the mobile app to generate FCM tokens');
+        if (usersWithoutTokensList.length > 0) {
+          addTestResult(`\n📋 Users without tokens (showing first 5):`);
+          usersWithoutTokensList.slice(0, 5).forEach(user => {
+            addTestResult(`   - ${user}`);
+          });
+          if (usersWithoutTokensList.length > 5) {
+            addTestResult(`   ... and ${usersWithoutTokensList.length - 5} more`);
+          }
+        }
+      }
+
+    } catch (error) {
+      addTestResult(`❌ Error checking FCM tokens: ${error}`);
+    }
+  };
+
+  const testCloudFunctions = async () => {
+    try {
+      addTestResult('🔍 Testing Cloud Functions endpoint...');
+
+      const functionsUrl = process.env.REACT_APP_FUNCTIONS_URL ||
+        'https://us-central1-mcq-quiz-system.cloudfunctions.net/api';
+
+      // Test health endpoint first
+      const healthUrl = `${functionsUrl}/health`;
+      addTestResult(`📡 Testing health endpoint: ${healthUrl}`);
+
+      const healthResponse = await fetch(healthUrl);
+      addTestResult(`🔍 Health response: ${healthResponse.status} ${healthResponse.statusText}`);
+
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        addTestResult(`✅ Cloud Functions are healthy: ${JSON.stringify(healthData)}`);
+
+        // Test notification endpoint
+        const notificationUrl = `${functionsUrl}/notifications/send-fcm`;
+        addTestResult(`📡 Notification endpoint URL: ${notificationUrl}`);
+        addTestResult(`✅ Cloud Functions endpoint is accessible`);
+      } else {
+        addTestResult(`❌ Cloud Functions health check failed`);
+      }
+
+    } catch (error) {
+      addTestResult(`❌ Error testing Cloud Functions: ${error}`);
+    }
   };
 
   return (
@@ -250,13 +382,79 @@ const NotificationTestPage: React.FC = () => {
               </Grid>
             </Grid>
 
-            <Box sx={{ mt: 2 }}>
+            {/* Delivery Method Tests */}
+            <Typography variant="h6" sx={{ mt: 3, mb: 2 }}>
+              Test Delivery Methods
+            </Typography>
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={4}>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={() => sendTestNotification('all', 'push_only')}
+                  disabled={loading || userCount === 0}
+                  startIcon={loading ? <CircularProgressIndicator size={20} /> : <SendIcon />}
+                >
+                  Push Only
+                </Button>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  color="secondary"
+                  onClick={() => sendTestNotification('all', 'in_app_only')}
+                  disabled={loading || userCount === 0}
+                  startIcon={loading ? <CircularProgressIndicator size={20} /> : <SendIcon />}
+                >
+                  In-App Only
+                </Button>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  color="success"
+                  onClick={() => sendTestNotification('all', 'both', true)}
+                  disabled={loading || userCount === 0}
+                  startIcon={loading ? <CircularProgressIndicator size={20} /> : <SendIcon />}
+                >
+                  Both + Test Image
+                </Button>
+              </Grid>
+            </Grid>
+
+            <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
               <Button
                 variant="outlined"
                 onClick={clearResults}
                 disabled={testResults.length === 0}
               >
                 Clear Results
+              </Button>
+              <Button
+                variant="outlined"
+                color="info"
+                onClick={debugEnvironment}
+              >
+                Debug Environment
+              </Button>
+              <Button
+                variant="outlined"
+                color="warning"
+                onClick={checkFCMTokens}
+                disabled={loading}
+              >
+                Check FCM Tokens
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={testCloudFunctions}
+                disabled={loading}
+              >
+                Test Cloud Functions
               </Button>
             </Box>
           </Paper>
@@ -302,6 +500,9 @@ const NotificationTestPage: React.FC = () => {
           Testing Instructions
         </Typography>
         <Typography variant="body2" paragraph>
+          <strong>Basic Tests:</strong>
+        </Typography>
+        <Typography variant="body2" paragraph>
           1. <strong>All Users:</strong> Sends a test notification to all active mobile users
         </Typography>
         <Typography variant="body2" paragraph>
@@ -311,10 +512,22 @@ const NotificationTestPage: React.FC = () => {
           3. <strong>By Office:</strong> Sends a test notification to users in the first available office
         </Typography>
         <Typography variant="body2" paragraph>
-          4. Check the mobile app's exam section notification icon to see if notifications appear
+          <strong>Delivery Method Tests:</strong>
+        </Typography>
+        <Typography variant="body2" paragraph>
+          4. <strong>Push Only:</strong> Sends push notification only (no in-app notification)
+        </Typography>
+        <Typography variant="body2" paragraph>
+          5. <strong>In-App Only:</strong> Creates in-app notification only (no push notification)
+        </Typography>
+        <Typography variant="body2" paragraph>
+          6. <strong>Both + Test Image:</strong> Sends both push and in-app notifications with a test image
+        </Typography>
+        <Typography variant="body2" paragraph>
+          7. Check the mobile app's exam section notification icon to see if notifications appear
         </Typography>
         <Typography variant="body2">
-          5. Monitor the test results panel for real-time feedback on the notification sending process
+          8. Monitor the test results panel for real-time feedback on the notification sending process
         </Typography>
       </Paper>
     </Box>

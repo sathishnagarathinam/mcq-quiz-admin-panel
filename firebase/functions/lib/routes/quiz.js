@@ -37,7 +37,6 @@ exports.quizRoutes = void 0;
 const express_1 = require("express");
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-exports.quizRoutes = router;
 // Get quiz results
 router.get('/results', async (req, res) => {
     try {
@@ -82,4 +81,5 @@ router.post('/submit', async (req, res) => {
         });
     }
 });
+exports.quizRoutes = router;
 //# sourceMappingURL=quiz.js.map

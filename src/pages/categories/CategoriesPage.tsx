@@ -51,11 +51,16 @@ import {
   TrendingUp as TrendingIcon,
   Star as StarIcon,
   ArrowBack,
+  ToggleOn as ToggleOnIcon,
+  ToggleOff as ToggleOffIcon,
+  NotificationsActive as NotificationsIcon,
 } from '@mui/icons-material';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { NotificationService } from '../../services/notificationService';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface Question {
   id: string;
@@ -88,6 +93,9 @@ interface Exam {
   totalAttempts?: number;
   isTrending?: boolean;
   trendingPriority?: number;
+  price?: number;
+  currency?: string;
+  isFree?: boolean;
 }
 
 const examSuitabilityOptions = ['MTS', 'Postman', 'PA', 'IP', 'Group B'];
@@ -112,10 +120,20 @@ const defaultExamTypes: ExamType[] = [
 
 const CategoriesPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [exams, setExams] = useState<Exam[]>([]);
   const [examTypes, setExamTypes] = useState<ExamType[]>(defaultExamTypes);
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
+
+  // Notification dialog states
+  const [openNotificationDialog, setOpenNotificationDialog] = useState(false);
+  const [selectedExamForNotification, setSelectedExamForNotification] = useState<Exam | null>(null);
+  const [notificationForm, setNotificationForm] = useState({
+    title: '',
+    body: '',
+  });
+  const [sendingNotification, setSendingNotification] = useState(false);
 
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -150,6 +168,9 @@ const CategoriesPage: React.FC = () => {
     totalAttempts: 0,
     isTrending: false,
     trendingPriority: 0,
+    price: 0,
+    currency: 'INR',
+    isFree: true,
   });
 
   // Live test form state
@@ -334,6 +355,9 @@ const CategoriesPage: React.FC = () => {
       totalAttempts: 0,
       isTrending: false,
       trendingPriority: 0,
+      price: 0,
+      currency: 'INR',
+      isFree: true,
     });
 
     // Reset live test form
@@ -548,6 +572,95 @@ const CategoriesPage: React.FC = () => {
     } catch (error) {
       console.error('Error updating trending status:', error);
       toast.error('Failed to update trending status');
+    }
+  };
+
+  const handleToggleActive = async (exam: Exam) => {
+    if (!exam.id) return;
+
+    try {
+      const newActiveStatus = !exam.isActive;
+
+      await updateDoc(doc(db, 'exams', exam.id), {
+        isActive: newActiveStatus,
+        updatedAt: Timestamp.now(),
+      });
+
+      toast.success(
+        newActiveStatus
+          ? 'Exam enabled successfully'
+          : 'Exam disabled successfully'
+      );
+      fetchExams();
+    } catch (error) {
+      console.error('Error toggling active status:', error);
+      toast.error('Failed to update exam status');
+    }
+  };
+
+  const handleOpenNotificationDialog = (exam: Exam) => {
+    setSelectedExamForNotification(exam);
+    setNotificationForm({
+      title: `New Test: ${exam.name}`,
+      body: `A new test "${exam.name}" is now available. Test it now!`,
+    });
+    setOpenNotificationDialog(true);
+  };
+
+  const handleCloseNotificationDialog = () => {
+    setOpenNotificationDialog(false);
+    setSelectedExamForNotification(null);
+    setNotificationForm({
+      title: '',
+      body: '',
+    });
+  };
+
+  const handleSendNotification = async () => {
+    if (!selectedExamForNotification || !selectedExamForNotification.id || !user) {
+      toast.error('Missing required information');
+      return;
+    }
+
+    if (!notificationForm.title.trim() || !notificationForm.body.trim()) {
+      toast.error('Please fill in both title and body');
+      return;
+    }
+
+    setSendingNotification(true);
+    try {
+      // Create notification with all users as target
+      const notificationId = await NotificationService.createNotification(
+        {
+          title: notificationForm.title,
+          body: notificationForm.body,
+          imageUrl: '',
+          actionUrl: `/quiz/${selectedExamForNotification.id}/instructions`,
+          actionType: 'quiz',
+          testImageUrl: '',
+          quizId: selectedExamForNotification.id, // Include quiz ID for direct navigation
+        },
+        {
+          type: 'all', // Send to all users
+        },
+        user.uid,
+        {
+          priority: 'high',
+          category: 'test_alert',
+          deliveryMethod: 'push_only', // Send as push notification
+        }
+      );
+
+      // Send the notification
+      await NotificationService.sendNotification(notificationId);
+
+      toast.success(`Notification sent to all users about "${selectedExamForNotification.name}"`);
+      handleCloseNotificationDialog();
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      toast.error('Failed to send notification');
+    } finally {
+      setSendingNotification(false);
     }
   };
 
@@ -918,15 +1031,35 @@ const CategoriesPage: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Tooltip title="Delete Exam">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDeleteExam(exam.id!)}
-                      color="error"
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Tooltip>
+                  <Box display="flex" gap={1}>
+                    <Tooltip title="Send Notification">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleOpenNotificationDialog(exam)}
+                        color="info"
+                      >
+                        <NotificationsIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title={exam.isActive ? "Disable Exam" : "Enable Exam"}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleToggleActive(exam)}
+                        color={exam.isActive ? "success" : "warning"}
+                      >
+                        {exam.isActive ? <ToggleOnIcon /> : <ToggleOffIcon />}
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete Exam">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteExam(exam.id!)}
+                        color="error"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </CardActions>
               </Card>
             </Grid>
@@ -1127,6 +1260,64 @@ const CategoriesPage: React.FC = () => {
                     ))}
                   </Select>
                 </FormControl>
+              </Grid>
+
+              {/* Price Configuration */}
+              <Grid item xs={12}>
+                <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f0f8ff' }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={examForm.isFree || false}
+                        onChange={(e) => setExamForm({ ...examForm, isFree: e.target.checked, price: e.target.checked ? 0 : examForm.price || 0 })}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                          💰 Pricing Configuration
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {examForm.isFree ? 'This exam will be free for all users' : 'This exam requires payment to access'}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+
+                  {!examForm.isFree && (
+                    <Box sx={{ mt: 2 }}>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            type="number"
+                            label="Price"
+                            value={examForm.price || 0}
+                            onChange={(e) => setExamForm({ ...examForm, price: parseFloat(e.target.value) || 0 })}
+                            inputProps={{ min: 0, step: 0.01 }}
+                            size="small"
+                            required={!examForm.isFree}
+                          />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Currency</InputLabel>
+                            <Select
+                              value={examForm.currency || 'INR'}
+                              label="Currency"
+                              onChange={(e) => setExamForm({ ...examForm, currency: e.target.value })}
+                            >
+                              <MenuItem value="INR">INR (₹)</MenuItem>
+                              <MenuItem value="USD">USD ($)</MenuItem>
+                              <MenuItem value="EUR">EUR (€)</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  )}
+                </Box>
               </Grid>
 
               {/* Live Test Option - Only show for new exams */}
@@ -1550,6 +1741,71 @@ const CategoriesPage: React.FC = () => {
             startIcon={<SaveIcon />}
           >
             {editingExamType ? 'Update Type' : 'Create Type'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Send Notification Dialog */}
+      <Dialog
+        open={openNotificationDialog}
+        onClose={handleCloseNotificationDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Send Notification - {selectedExamForNotification?.name}
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              fullWidth
+              label="Notification Title"
+              value={notificationForm.title}
+              onChange={(e) =>
+                setNotificationForm({ ...notificationForm, title: e.target.value })
+              }
+              placeholder="e.g., New Test: SSC CGL 2024"
+              multiline
+              rows={2}
+            />
+            <TextField
+              fullWidth
+              label="Notification Body"
+              value={notificationForm.body}
+              onChange={(e) =>
+                setNotificationForm({ ...notificationForm, body: e.target.value })
+              }
+              placeholder="e.g., A new test is now available. Test it now!"
+              multiline
+              rows={3}
+            />
+            <Alert severity="info">
+              <Typography variant="body2">
+                This notification will be sent to <strong>all users</strong> with a direct link to the quiz instruction page.
+              </Typography>
+            </Alert>
+            <Alert severity="success">
+              <Typography variant="body2">
+                When users tap the notification, they will be taken directly to the quiz instruction page where they can start the test.
+              </Typography>
+            </Alert>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleCloseNotificationDialog}
+            disabled={sendingNotification}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSendNotification}
+            variant="contained"
+            color="primary"
+            disabled={sendingNotification}
+            startIcon={sendingNotification ? <CircularProgress size={20} /> : <NotificationsIcon />}
+          >
+            {sendingNotification ? 'Sending...' : 'Send Notification'}
           </Button>
         </DialogActions>
       </Dialog>

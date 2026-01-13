@@ -37,7 +37,6 @@ exports.questionRoutes = void 0;
 const express_1 = require("express");
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-exports.questionRoutes = router;
 // Get questions with pagination
 router.get('/', async (req, res) => {
     try {
@@ -87,4 +86,5 @@ router.post('/', async (req, res) => {
         });
     }
 });
+exports.questionRoutes = router;
 //# sourceMappingURL=questions.js.map

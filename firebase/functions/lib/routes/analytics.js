@@ -37,7 +37,6 @@ exports.analyticsRoutes = void 0;
 const express_1 = require("express");
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-exports.analyticsRoutes = router;
 // Get analytics data
 router.get('/', async (req, res) => {
     try {
@@ -67,4 +66,5 @@ router.get('/', async (req, res) => {
         });
     }
 });
+exports.analyticsRoutes = router;
 //# sourceMappingURL=analytics.js.map

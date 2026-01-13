@@ -58,4 +58,4 @@ router.post('/create-custom-token', async (req, res) => {
   }
 });
 
-export { router as authRoutes };
+export const authRoutes = router;
