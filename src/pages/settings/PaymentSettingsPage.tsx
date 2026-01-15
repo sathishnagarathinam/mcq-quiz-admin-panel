@@ -39,7 +39,7 @@ import {
   Refresh as RefreshIcon,
   Info as InfoIcon,
 } from '@mui/icons-material';
-import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import toast from 'react-hot-toast';
 
@@ -105,8 +105,97 @@ const PaymentSettingsPage: React.FC = () => {
 
   useEffect(() => {
     loadPaymentConfig();
-    loadPaymentStats();
-    loadRecentTransactions();
+  }, []);
+
+  useEffect(() => {
+    // Set up real-time listener for payment stats
+    // Query from 'orders' collection where payment data is actually stored
+    // No limit - load ALL payments for accurate real-time stats
+    // Using simple collection reference without orderBy to avoid index requirements
+    const ordersCollection = collection(db, 'orders');
+
+    console.log('🔄 Setting up real-time listener for payment stats...');
+
+    const unsubscribeStats = onSnapshot(
+      ordersCollection,
+      (snapshot) => {
+        try {
+          console.log(`📊 Received ${snapshot.docs.length} orders for stats`);
+
+          const payments = snapshot.docs.map(doc => {
+            const data = doc.data();
+            // Normalize status: convert 'paid' to 'COMPLETED', 'pending' to 'PENDING'
+            const status = (data.status || 'PENDING').toUpperCase();
+            return {
+              ...data,
+              status: status === 'PAID' ? 'COMPLETED' : status,
+              amount: data.amount || 0
+            };
+          });
+          const successful = payments.filter(p => p.status === 'COMPLETED');
+          const failed = payments.filter(p => p.status === 'FAILED');
+
+          const totalRevenue = successful.reduce((sum, p) => sum + (p.amount || 0), 0);
+          const averageValue = successful.length > 0 ? totalRevenue / successful.length : 0;
+
+          console.log(`✅ Stats: ${payments.length} total, ${successful.length} successful, ${failed.length} failed`);
+
+          setPaymentStats({
+            totalTransactions: payments.length,
+            successfulPayments: successful.length,
+            failedPayments: failed.length,
+            totalRevenue,
+            averageTransactionValue: averageValue,
+          });
+        } catch (error) {
+          console.error('❌ Error processing payment stats snapshot:', error);
+        }
+      },
+      (error) => {
+        console.error('❌ Error listening to payment stats:', error);
+      }
+    );
+
+    return () => unsubscribeStats();
+  }, []);
+
+  useEffect(() => {
+    // Set up real-time listener for recent transactions
+    // Query from 'orders' collection where payment data is actually stored
+    // Using simple collection reference without orderBy to avoid index requirements
+    const ordersCollection = collection(db, 'orders');
+
+    const unsubscribeTransactions = onSnapshot(
+      ordersCollection,
+      (snapshot) => {
+        try {
+          // Get all transactions and sort by createdAt descending on client side
+          const allTransactions = snapshot.docs.map(doc => {
+            const data = doc.data();
+            let createdAt = new Date();
+            if (data.createdAt) {
+              if (typeof data.createdAt.toDate === 'function') {
+                createdAt = data.createdAt.toDate();
+              } else if (data.createdAt instanceof Date) {
+                createdAt = data.createdAt;
+              }
+            }
+            return { id: doc.id, ...data, createdAt };
+          });
+
+          // Sort by createdAt descending and take first 10
+          allTransactions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+          setRecentTransactions(allTransactions.slice(0, 10));
+        } catch (error) {
+          console.error('❌ Error processing recent transactions snapshot:', error);
+        }
+      },
+      (error) => {
+        console.error('❌ Error listening to recent transactions:', error);
+      }
+    );
+
+    return () => unsubscribeTransactions();
   }, []);
 
   const loadPaymentConfig = async () => {
@@ -120,48 +209,6 @@ const PaymentSettingsPage: React.FC = () => {
       toast.error('Failed to load payment configuration');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadPaymentStats = async () => {
-    try {
-      const paymentsQuery = query(
-        collection(db, 'payments'),
-        orderBy('createdAt', 'desc'),
-        limit(100)
-      );
-      const snapshot = await getDocs(paymentsQuery);
-      
-      const payments = snapshot.docs.map(doc => doc.data());
-      const successful = payments.filter(p => p.status === 'COMPLETED');
-      const failed = payments.filter(p => p.status === 'FAILED');
-      
-      const totalRevenue = successful.reduce((sum, p) => sum + (p.amount || 0), 0);
-      const averageValue = successful.length > 0 ? totalRevenue / successful.length : 0;
-
-      setPaymentStats({
-        totalTransactions: payments.length,
-        successfulPayments: successful.length,
-        failedPayments: failed.length,
-        totalRevenue,
-        averageTransactionValue: averageValue,
-      });
-    } catch (error) {
-      console.error('Error loading payment stats:', error);
-    }
-  };
-
-  const loadRecentTransactions = async () => {
-    try {
-      const paymentsQuery = query(
-        collection(db, 'payments'),
-        orderBy('createdAt', 'desc'),
-        limit(10)
-      );
-      const snapshot = await getDocs(paymentsQuery);
-      setRecentTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    } catch (error) {
-      console.error('Error loading recent transactions:', error);
     }
   };
 
@@ -645,18 +692,9 @@ const PaymentSettingsPage: React.FC = () => {
         <Grid item xs={12}>
           <Card>
             <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <HistoryIcon color="primary" />
-                  <Typography variant="h6">Recent Transactions</Typography>
-                </Box>
-                <Button
-                  startIcon={<RefreshIcon />}
-                  onClick={loadRecentTransactions}
-                  size="small"
-                >
-                  Refresh
-                </Button>
+              <Box display="flex" alignItems="center" gap={1} mb={2}>
+                <HistoryIcon color="primary" />
+                <Typography variant="h6">Recent Transactions (Live)</Typography>
               </Box>
 
               <TableContainer>

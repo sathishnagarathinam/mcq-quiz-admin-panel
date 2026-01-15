@@ -13,6 +13,7 @@ import { analyticsRoutes } from './routes/analytics';
 import { userRoutes } from './routes/users';
 import { notificationRoutes } from './routes/notifications';
 import { fcmCleanupRoutes } from './routes/fcm-cleanup';
+import { paymentRoutes } from './routes/payments';
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -35,6 +36,7 @@ app.use('/analytics', analyticsRoutes);
 app.use('/users', userRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/fcm-cleanup', fcmCleanupRoutes);
+app.use('/payments', paymentRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

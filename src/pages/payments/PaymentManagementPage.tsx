@@ -33,7 +33,7 @@ import {
   Download as DownloadIcon,
   ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
-import { collection, getDocs, query, orderBy, limit, where, Timestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 
 interface Payment {
@@ -77,76 +77,143 @@ const PaymentManagementPage: React.FC = () => {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
-    loadPayments();
+    setLoading(true);
+    // Query from 'orders' collection where payment data is actually stored
+    // No limit - load ALL payments for real-time display
+    // Using simple collection reference without orderBy to avoid index requirements
+    const ordersCollection = collection(db, 'orders');
+
+    console.log('🔄 Setting up real-time listener for orders collection...');
+
+    // Set up real-time listener
+    const unsubscribe = onSnapshot(
+      ordersCollection,
+      async (snapshot) => {
+        try {
+          console.log(`📦 Received ${snapshot.docs.length} orders from Firestore`);
+
+          const paymentsList: Payment[] = await Promise.all(
+            snapshot.docs.map(async (paymentDoc) => {
+              const data = paymentDoc.data();
+              console.log(`📝 Processing order: ${paymentDoc.id}`, data);
+
+              let userName = '';
+              let userEmail = '';
+              let userPhone = '';
+              let examName = 'N/A';
+
+              // Use email/phone from order data first (stored during order creation)
+              userEmail = data.userEmail || '';
+              userPhone = data.userPhone || '';
+
+              // Fetch user details directly by document ID (userId is the document ID in mobile_users collection)
+              try {
+                if (data.userId) {
+                  const userDocRef = doc(db, 'mobile_users', data.userId);
+                  const userSnapshot = await getDoc(userDocRef);
+                  if (userSnapshot.exists()) {
+                    const userData = userSnapshot.data();
+                    // Try 'name' first, then 'displayName'
+                    userName = userData?.name || userData?.displayName || '';
+                    // Only override if not already set from order data
+                    if (!userEmail) userEmail = userData?.email || '';
+                    if (!userPhone) userPhone = userData?.phoneNumber || '';
+                    console.log(`✅ Fetched user data for ${data.userId}:`, { userName, userEmail, userPhone });
+                  } else {
+                    console.warn(`⚠️ User document not found for ${data.userId}`);
+                  }
+                }
+              } catch (err) {
+                console.warn(`❌ Could not fetch user details for ${data.userId}:`, err);
+              }
+
+              // Fetch exam name from exams collection using examId
+              try {
+                if (data.examId) {
+                  const examDocRef = doc(db, 'exams', data.examId);
+                  const examSnapshot = await getDoc(examDocRef);
+                  if (examSnapshot.exists()) {
+                    const examData = examSnapshot.data();
+                    // Use 'name' field from exam document (same as exam management page)
+                    examName = examData?.name || data.examName || data.examId || 'N/A';
+                    console.log(`✅ Fetched exam name for ${data.examId}:`, examName);
+                  } else {
+                    console.warn(`⚠️ Exam document not found for ${data.examId}`);
+                    examName = data.examName || data.examId || 'N/A';
+                  }
+                } else {
+                  examName = data.examName || 'N/A';
+                }
+              } catch (err) {
+                console.warn(`❌ Could not fetch exam details for ${data.examId}:`, err);
+                examName = data.examName || data.examId || 'N/A';
+              }
+
+              // Normalize status: convert 'paid' to 'COMPLETED', 'pending' to 'PENDING'
+              let status = (data.status || 'PENDING').toUpperCase();
+              if (status === 'PAID') {
+                status = 'COMPLETED';
+              }
+
+              // Handle createdAt - could be Firestore Timestamp or null
+              let createdAtDate = new Date();
+              if (data.createdAt) {
+                if (typeof data.createdAt.toDate === 'function') {
+                  createdAtDate = data.createdAt.toDate();
+                } else if (data.createdAt instanceof Date) {
+                  createdAtDate = data.createdAt;
+                }
+              }
+
+              let updatedAtDate = new Date();
+              if (data.updatedAt) {
+                if (typeof data.updatedAt.toDate === 'function') {
+                  updatedAtDate = data.updatedAt.toDate();
+                } else if (data.updatedAt instanceof Date) {
+                  updatedAtDate = data.updatedAt;
+                }
+              }
+
+              return {
+                id: paymentDoc.id,
+                ...data,
+                status,
+                userName,
+                userEmail,
+                userPhone,
+                examName,
+                gateway: 'Razorpay', // Payment backend uses Razorpay
+                createdAt: createdAtDate,
+                updatedAt: updatedAtDate,
+              } as Payment;
+            })
+          );
+
+          // Sort by createdAt descending (newest first) on client side
+          paymentsList.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+          console.log(`✅ Processed ${paymentsList.length} payments successfully`);
+          setPayments(paymentsList);
+          calculateStats(paymentsList);
+          setLoading(false);
+        } catch (error) {
+          console.error('❌ Error processing payments snapshot:', error);
+          setLoading(false);
+        }
+      },
+      (error) => {
+        console.error('❌ Error listening to orders:', error);
+        setLoading(false);
+      }
+    );
+
+    // Cleanup: unsubscribe from listener when component unmounts
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     filterPayments();
   }, [payments, statusFilter, fromDate, toDate]);
-
-  const loadPayments = async () => {
-    try {
-      setLoading(true);
-      const paymentsQuery = query(
-        collection(db, 'payments'),
-        orderBy('createdAt', 'desc'),
-        limit(500)
-      );
-      const snapshot = await getDocs(paymentsQuery);
-
-      const paymentsList: Payment[] = await Promise.all(
-        snapshot.docs.map(async (paymentDoc) => {
-          const data = paymentDoc.data();
-          let userName = '';
-          let userEmail = '';
-          let userPhone = '';
-
-          // Fetch user details directly by document ID (userId is the document ID in mobile_users collection)
-          try {
-            const userDocRef = doc(db, 'mobile_users', data.userId);
-            const userSnapshot = await getDoc(userDocRef);
-            if (userSnapshot.exists()) {
-              const userData = userSnapshot.data();
-              // Try 'name' first, then 'displayName'
-              userName = userData?.name || userData?.displayName || '';
-              userEmail = userData?.email || '';
-              userPhone = userData?.phoneNumber || '';
-              console.log(`✅ Fetched user data for ${data.userId}:`, { userName, userEmail, userPhone });
-            } else {
-              console.warn(`⚠️ User document not found for ${data.userId}`);
-            }
-          } catch (err) {
-            console.warn(`❌ Could not fetch user details for ${data.userId}:`, err);
-          }
-
-          // Normalize status: convert 'PAID' to 'COMPLETED'
-          let status = data.status || 'PENDING';
-          if (status === 'PAID') {
-            status = 'COMPLETED';
-          }
-
-          return {
-            id: paymentDoc.id,
-            ...data,
-            status,
-            userName,
-            userEmail,
-            userPhone,
-            examName: data.examName || 'N/A',
-            createdAt: data.createdAt?.toDate() || new Date(),
-            updatedAt: data.updatedAt?.toDate() || new Date(),
-          } as Payment;
-        })
-      );
-
-      setPayments(paymentsList);
-      calculateStats(paymentsList);
-    } catch (error) {
-      console.error('Error loading payments:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const calculateStats = (paymentsList: Payment[]) => {
     const successful = paymentsList.filter(p => p.status === 'COMPLETED');
@@ -174,16 +241,19 @@ const PaymentManagementPage: React.FC = () => {
       filtered = filtered.filter(p => p.status === statusFilter);
     }
 
-    // Filter by date range
+    // Filter by date range (handle timezone correctly)
     if (fromDate) {
-      const fromDateTime = new Date(fromDate).getTime();
+      // Parse date string (YYYY-MM-DD format from input)
+      const [year, month, day] = fromDate.split('-').map(Number);
+      const fromDateTime = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
       filtered = filtered.filter(p => p.createdAt.getTime() >= fromDateTime);
     }
 
     if (toDate) {
-      const toDateTime = new Date(toDate);
-      toDateTime.setHours(23, 59, 59, 999); // End of day
-      filtered = filtered.filter(p => p.createdAt.getTime() <= toDateTime.getTime());
+      // Parse date string (YYYY-MM-DD format from input)
+      const [year, month, day] = toDate.split('-').map(Number);
+      const toDateTime = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+      filtered = filtered.filter(p => p.createdAt.getTime() <= toDateTime);
     }
 
     setFilteredPayments(filtered);

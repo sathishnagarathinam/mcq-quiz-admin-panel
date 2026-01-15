@@ -61,6 +61,7 @@ import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { NotificationService } from '../../services/notificationService';
 import { useAuth } from '../../contexts/AuthContext';
+import ExamAttemptsDialog from '../../components/admin/ExamAttemptsDialog';
 
 interface Question {
   id: string;
@@ -134,6 +135,10 @@ const CategoriesPage: React.FC = () => {
     body: '',
   });
   const [sendingNotification, setSendingNotification] = useState(false);
+
+  // Exam attempts dialog states
+  const [openAttemptsDialog, setOpenAttemptsDialog] = useState(false);
+  const [selectedExamForAttempts, setSelectedExamForAttempts] = useState<Exam | null>(null);
 
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -241,10 +246,35 @@ const CategoriesPage: React.FC = () => {
       setLoading(true);
       const querySnapshot = await getDocs(collection(db, 'exams'));
       const examsList: Exam[] = [];
+
+      // Fetch all exams first
       querySnapshot.forEach((doc) => {
         examsList.push({ id: doc.id, ...doc.data() } as Exam);
       });
-      setExams(examsList);
+
+      // Calculate totalAttempts for each exam from quiz_attempts collection
+      const examsWithAttempts = await Promise.all(
+        examsList.map(async (exam) => {
+          try {
+            // Query quiz_attempts for this exam
+            const attemptsQuery = query(
+              collection(db, 'quiz_attempts'),
+              where('examId', '==', exam.id)
+            );
+            const attemptsSnapshot = await getDocs(attemptsQuery);
+
+            return {
+              ...exam,
+              totalAttempts: attemptsSnapshot.size,
+            };
+          } catch (error) {
+            console.warn(`Error fetching attempts for exam ${exam.id}:`, error);
+            return exam;
+          }
+        })
+      );
+
+      setExams(examsWithAttempts);
     } catch (error) {
       console.error('Error fetching exams:', error);
       toast.error('Failed to fetch exams');
@@ -990,12 +1020,24 @@ const CategoriesPage: React.FC = () => {
                         />
                       )}
                       {(exam.totalAttempts || 0) > 0 && (
-                        <Chip
-                          label={`${exam.totalAttempts} attempts`}
-                          variant="outlined"
-                          size="small"
-                          sx={{ fontSize: '0.7rem' }}
-                        />
+                        <Tooltip title="Click to view user attempts">
+                          <Chip
+                            label={`${exam.totalAttempts} attempts`}
+                            variant="outlined"
+                            size="small"
+                            onClick={() => {
+                              setSelectedExamForAttempts(exam);
+                              setOpenAttemptsDialog(true);
+                            }}
+                            sx={{
+                              fontSize: '0.7rem',
+                              cursor: 'pointer',
+                              '&:hover': {
+                                backgroundColor: 'action.hover',
+                              }
+                            }}
+                          />
+                        </Tooltip>
                       )}
                     </Box>
                   </Box>
@@ -1809,6 +1851,17 @@ const CategoriesPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Exam Attempts Dialog */}
+      <ExamAttemptsDialog
+        open={openAttemptsDialog}
+        examId={selectedExamForAttempts?.id || ''}
+        examName={selectedExamForAttempts?.name || ''}
+        onClose={() => {
+          setOpenAttemptsDialog(false);
+          setSelectedExamForAttempts(null);
+        }}
+      />
     </Box>
   );
 };

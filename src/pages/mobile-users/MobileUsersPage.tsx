@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -25,6 +25,7 @@ import {
   CircularProgress,
   Tabs,
   Tab,
+  Badge,
 
 } from '@mui/material';
 import {
@@ -37,13 +38,29 @@ import {
   Star,
   Schedule,
   Person,
-
+  FiberManualRecord,
   ArrowBack,
+  CurrencyRupee,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { collection, getDocs, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, where, Unsubscribe } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import UserAnalyticsDialog from '../../components/admin/UserAnalyticsDialog';
+
+interface QuizAttempt {
+  id: string;
+  userId: string;
+  examId?: string;
+  examCategory?: string;
+  category?: string;
+  totalQuestions: number;
+  correctAnswers: number;
+  scorePercentage: number;
+  timeTaken: number;
+  isCompleted: boolean;
+  attemptedAt?: Date;
+  completedAt?: Date;
+}
 
 interface MobileUser {
   id: string;
@@ -62,6 +79,13 @@ interface MobileUser {
   userType?: string;
   emailVerified?: boolean;
   profileComplete?: boolean;
+  totalPaidAmount?: number; // Sum of all paid quiz amounts
+  paidQuizCount?: number; // Number of paid quizzes purchased
+  recentActivity?: {
+    lastQuizDate?: Date;
+    lastQuizScore?: number;
+    sessionsThisWeek: number;
+  };
 }
 
 interface MobileUserStats {
@@ -71,6 +95,8 @@ interface MobileUserStats {
   averageQuizzesPerUser: number;
   averageScore: number;
   topPerformers: MobileUser[];
+  totalRevenue: number; // Total amount from paid quizzes
+  totalPaidUsers: number; // Number of users who paid for quizzes
 }
 
 interface TabPanelProps {
@@ -106,425 +132,324 @@ const MobileUsersPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<MobileUser | null>(null);
   const [analyticsDialogOpen, setAnalyticsDialogOpen] = useState(false);
   const [filterDesignation, setFilterDesignation] = useState('');
-  const [debugInfo, setDebugInfo] = useState<{
-    collectionsChecked: string[];
-    documentsFound: number;
-    sampleDocument: any;
-    errors: string[];
-  }>({
-    collectionsChecked: [],
-    documentsFound: 0,
-    sampleDocument: null,
-    errors: []
-  });
+  const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  const [recentActivities, setRecentActivities] = useState<QuizAttempt[]>([]);
 
+  // Store quiz attempts for real-time user stats calculation
+  const quizAttemptsRef = useRef<Map<string, QuizAttempt[]>>(new Map());
+  // Store raw user data for combining with quiz attempts
+  const rawUsersRef = useRef<Map<string, any>>(new Map());
+  // Store paid orders for calculating total paid amount per user
+  const paidOrdersRef = useRef<Map<string, { amount: number; count: number }>>(new Map());
 
+  // Calculate user stats from quiz attempts
+  const calculateUserStats = useCallback((userId: string, userData: any): {
+    totalQuizzes: number;
+    averageScore: number;
+    currentStreak: number;
+    activityLevel: 'Very Active' | 'Active' | 'Moderate' | 'Inactive';
+    recentActivity?: MobileUser['recentActivity'];
+  } => {
+    const userAttempts = quizAttemptsRef.current.get(userId) || [];
+    const completedAttempts = userAttempts.filter(a => a.isCompleted);
 
-  const debugFirestoreCollections = async () => {
-    const possibleCollections = ['users', 'mobile_users', 'app_users', 'registered_users', 'user_profiles'];
-    const debugResults = {
-      collectionsChecked: [] as string[],
-      documentsFound: 0,
-      sampleDocument: null as any,
-      errors: [] as string[]
-    };
+    // Use quiz attempts data if available, otherwise fallback to user document data
+    const totalQuizzes = completedAttempts.length || userData.quizzesTaken || userData.stats?.totalQuizzes || 0;
 
-    for (const collectionName of possibleCollections) {
-      try {
-        console.log(`🔍 Checking collection: ${collectionName}`);
-        const collectionRef = collection(db, collectionName);
-        const snapshot = await getDocs(collectionRef);
+    // Calculate average score from quiz attempts
+    const averageScore = completedAttempts.length > 0
+      ? completedAttempts.reduce((sum, a) => sum + (a.scorePercentage || 0), 0) / completedAttempts.length
+      : userData.averageScore || userData.stats?.averageScore || 0;
 
-        debugResults.collectionsChecked.push(collectionName);
-
-        if (snapshot.docs.length > 0) {
-          console.log(`✅ Found ${snapshot.docs.length} documents in ${collectionName}`);
-          debugResults.documentsFound = snapshot.docs.length;
-          debugResults.sampleDocument = {
-            id: snapshot.docs[0].id,
-            data: snapshot.docs[0].data(),
-            collection: collectionName
-          };
-
-          // If we found users, use this collection
-          return { collectionName, snapshot };
-        } else {
-          console.log(`📭 Collection ${collectionName} is empty`);
-        }
-      } catch (error) {
-        console.log(`❌ Error accessing collection ${collectionName}:`, error);
-        debugResults.errors.push(`${collectionName}: ${error}`);
-      }
-    }
-
-    setDebugInfo(debugResults);
-    return null;
-  };
-
-  const setupRealtimeListener = useCallback(() => {
-    console.log('🔍 Setting up real-time listener for mobile users...');
-
-    // Set up real-time listener for mobile_users collection
-    const mobileUsersRef = collection(db, 'mobile_users');
-    const q = query(mobileUsersRef, orderBy('createdAt', 'desc'));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log(`📡 Real-time update: ${snapshot.docs.length} mobile users found`);
-
-      const realUsers: MobileUser[] = [];
-
-      snapshot.docs.forEach((userDoc) => {
-        const userData = userDoc.data();
-        console.log(`👤 Processing user ${userDoc.id}:`, {
-          name: userData.name,
-          email: userData.email,
-          userType: userData.userType,
-          isActive: userData.isActive
-        });
-
-        // Extract statistics from user document (updated by mobile app)
-        const totalQuizzes = userData.quizzesTaken || userData.stats?.totalQuizzes || 0;
-        const averageScore = userData.averageScore || userData.stats?.averageScore || 0;
-        const currentStreak = userData.stats?.currentStreak || 0;
-
-        console.log(`📊 User ${userDoc.id} stats from document:`, {
-          quizzesTaken: userData.quizzesTaken,
-          averageScore: userData.averageScore,
-          statsObject: userData.stats,
-          calculatedTotalQuizzes: totalQuizzes,
-          calculatedAverageScore: averageScore,
-          calculatedCurrentStreak: currentStreak
-        });
-
-        // Calculate activity level
-        const lastLoginDate = userData.lastLoginAt?.toDate() || userData.updatedAt?.toDate();
-        const daysSinceLastLogin = lastLoginDate
-          ? Math.floor((new Date().getTime() - lastLoginDate.getTime()) / (1000 * 60 * 60 * 24))
-          : 999;
-
-        let activityLevel: 'Very Active' | 'Active' | 'Moderate' | 'Inactive' = 'Inactive';
-        if (daysSinceLastLogin <= 1 && totalQuizzes >= 5) {
-          activityLevel = 'Very Active';
-        } else if (daysSinceLastLogin <= 3 && totalQuizzes >= 3) {
-          activityLevel = 'Active';
-        } else if (daysSinceLastLogin <= 7 && totalQuizzes >= 1) {
-          activityLevel = 'Moderate';
-        }
-
-        // Create user object with consistent data structure
-        const user: MobileUser = {
-          id: userDoc.id,
-          name: userData.name || 'Unknown User',
-          email: userData.email || 'No email',
-          phone: userData.phoneNumber || userData.phone || 'Not provided',
-          designation: userData.designation || 'Not specified',
-          officeName: userData.officeName || 'Not specified',
-          registeredAt: userData.createdAt?.toDate() || new Date(),
-          lastLoginAt: lastLoginDate,
-          isActive: userData.isActive !== false,
-          totalQuizzes,
-          averageScore: Math.round(averageScore * 10) / 10,
-          currentStreak,
-          activityLevel,
-          userType: userData.userType || 'mobile_user',
-          emailVerified: userData.emailVerified || false,
-          profileComplete: userData.profileComplete || false,
-        };
-
-        realUsers.push(user);
-      });
-
-      console.log(`✅ Processed ${realUsers.length} mobile users`);
-      setUsers(realUsers);
-      setLoading(false);
-
-      // Update stats
-      const currentMonth = new Date();
-      const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-      const newUsersThisMonth = realUsers.filter(u => u.registeredAt >= firstDayOfMonth).length;
-      const totalQuizzes = realUsers.reduce((sum, u) => sum + u.totalQuizzes, 0);
-      const averageQuizzesPerUser = realUsers.length > 0 ? totalQuizzes / realUsers.length : 0;
-      const topPerformers = realUsers
-        .filter(u => u.totalQuizzes > 0)
-        .sort((a, b) => b.averageScore - a.averageScore)
-        .slice(0, 5);
-
-      const stats = {
-        totalUsers: realUsers.length,
-        activeUsers: realUsers.filter(u => u.isActive).length,
-        newUsersThisMonth,
-        averageQuizzesPerUser: Math.round(averageQuizzesPerUser * 10) / 10,
-        averageScore: realUsers.length > 0
-          ? Math.round((realUsers.reduce((sum, u) => sum + u.averageScore, 0) / realUsers.length) * 10) / 10
-          : 0,
-        topPerformers
-      };
-      setStats(stats);
-    }, (error) => {
-      console.error('❌ Real-time listener error:', error);
-      setError('Failed to load mobile users: ' + error.message);
-      setLoading(false);
+    // Calculate streak
+    const sortedAttempts = [...completedAttempts].sort((a, b) => {
+      const dateA = a.completedAt || a.attemptedAt || new Date(0);
+      const dateB = b.completedAt || b.attemptedAt || new Date(0);
+      return dateB.getTime() - dateA.getTime();
     });
 
-    return unsubscribe;
+    let currentStreak = 0;
+    let lastDateStr: string | null = null;
+
+    for (const attempt of sortedAttempts) {
+      const attemptDate = attempt.completedAt || attempt.attemptedAt;
+      if (!attemptDate) continue;
+      const dateStr = attemptDate.toDateString();
+
+      if (!lastDateStr) {
+        lastDateStr = dateStr;
+        currentStreak = 1;
+      } else if (dateStr === lastDateStr) {
+        continue;
+      } else {
+        const lastDate = new Date(lastDateStr);
+        const daysDiff = Math.floor((lastDate.getTime() - attemptDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysDiff === 1) {
+          currentStreak++;
+          lastDateStr = dateStr;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // If no quiz attempts, use user document streak
+    if (currentStreak === 0) {
+      currentStreak = userData.stats?.currentStreak || 0;
+    }
+
+    // Calculate activity level based on last login and recent activity
+    const lastLoginDate = userData.lastLoginAt?.toDate?.() || userData.lastLoginAt || userData.updatedAt?.toDate?.();
+    const daysSinceLastLogin = lastLoginDate
+      ? Math.floor((new Date().getTime() - new Date(lastLoginDate).getTime()) / (1000 * 60 * 60 * 24))
+      : 999;
+
+    // Calculate sessions this week
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const sessionsThisWeek = completedAttempts.filter(a => {
+      const date = a.completedAt || a.attemptedAt;
+      return date && date > oneWeekAgo;
+    }).length;
+
+    let activityLevel: 'Very Active' | 'Active' | 'Moderate' | 'Inactive' = 'Inactive';
+    if (daysSinceLastLogin <= 1 && sessionsThisWeek >= 5) {
+      activityLevel = 'Very Active';
+    } else if (daysSinceLastLogin <= 3 && sessionsThisWeek >= 3) {
+      activityLevel = 'Active';
+    } else if (daysSinceLastLogin <= 7 && sessionsThisWeek >= 1) {
+      activityLevel = 'Moderate';
+    }
+
+    // Get recent activity info
+    const lastQuiz = sortedAttempts[0];
+    const recentActivity: MobileUser['recentActivity'] = {
+      lastQuizDate: lastQuiz?.completedAt || lastQuiz?.attemptedAt,
+      lastQuizScore: lastQuiz?.scorePercentage,
+      sessionsThisWeek,
+    };
+
+    return {
+      totalQuizzes,
+      averageScore: Math.round(averageScore * 10) / 10,
+      currentStreak,
+      activityLevel,
+      recentActivity,
+    };
   }, []);
 
-  const loadMobileUsers = useCallback(async () => {
-    try {
-      setLoading(true);
-      console.log('🔍 Starting comprehensive Firestore debugging...');
+  // Build users array from raw data and quiz attempts
+  const buildUsersWithStats = useCallback(() => {
+    const realUsers: MobileUser[] = [];
 
-      // First, try to find which collection has user data
-      const foundCollection = await debugFirestoreCollections();
+    rawUsersRef.current.forEach((userData, odocId) => {
+      const userStats = calculateUserStats(odocId, userData);
+      const lastLoginDate = userData.lastLoginAt?.toDate?.() || userData.lastLoginAt || userData.updatedAt?.toDate?.();
 
-      if (!foundCollection) {
-        console.log('❌ No user collections found with data');
-        throw new Error('No user collections found with data');
-      }
+      // Get paid order data for this user
+      const userPaymentData = paidOrdersRef.current.get(odocId) || { amount: 0, count: 0 };
 
-      const { collectionName, snapshot } = foundCollection;
-      console.log(`✅ Using collection: ${collectionName} with ${snapshot.docs.length} documents`);
-
-      const realUsers: MobileUser[] = [];
-
-      for (const userDoc of snapshot.docs) {
-        const userData = userDoc.data();
-        console.log(`👤 Processing user ${userDoc.id}:`, {
-          name: userData.name || userData.displayName || userData.fullName,
-          email: userData.email,
-          phone: userData.phone || userData.phoneNumber,
-          hasCreatedAt: !!userData.createdAt,
-          hasDesignation: !!userData.designation,
-          allFields: Object.keys(userData)
-        });
-
-        // Fetch user analytics for each user (for future use)
-        try {
-          const analyticsRef = collection(db, 'user_analytics');
-          const analyticsQuery = query(analyticsRef, where('userId', '==', userDoc.id));
-          const analyticsSnapshot = await getDocs(analyticsQuery);
-
-          if (!analyticsSnapshot.empty) {
-            // Analytics data available for future features
-            console.log('Analytics found for user:', userDoc.id);
-          }
-        } catch (analyticsError) {
-          console.log('No analytics found for user:', userDoc.id);
-        }
-
-        // Fetch quiz attempts for this user
-        let quizAttempts: any[] = [];
-        try {
-          const attemptsRef = collection(db, 'quiz_attempts');
-          const attemptsQuery = query(attemptsRef, where('userId', '==', userDoc.id));
-          const attemptsSnapshot = await getDocs(attemptsQuery);
-          quizAttempts = attemptsSnapshot.docs.map(doc => doc.data());
-        } catch (attemptsError) {
-          console.log('No quiz attempts found for user:', userDoc.id);
-        }
-
-        // Calculate statistics from quiz attempts
-        const totalQuizzes = quizAttempts.length;
-        const completedQuizzes = quizAttempts.filter(attempt => attempt.isCompleted);
-        const averageScore = completedQuizzes.length > 0
-          ? completedQuizzes.reduce((sum, attempt) => sum + (attempt.scorePercentage || 0), 0) / completedQuizzes.length
-          : 0;
-
-        // Calculate current streak
-        const sortedAttempts = quizAttempts
-          .filter(attempt => attempt.isCompleted)
-          .sort((a, b) => new Date(b.completedAt?.toDate?.() || b.completedAt).getTime() - new Date(a.completedAt?.toDate?.() || a.completedAt).getTime());
-
-        let currentStreak = 0;
-        let lastDate = null;
-
-        for (const attempt of sortedAttempts) {
-          const attemptDate = new Date(attempt.completedAt?.toDate?.() || attempt.completedAt);
-          const dateString = attemptDate.toDateString();
-
-          if (lastDate === null) {
-            lastDate = dateString;
-            currentStreak = 1;
-          } else if (lastDate === dateString) {
-            // Same day, continue
-            continue;
-          } else {
-            const daysDiff = Math.floor((new Date(lastDate).getTime() - attemptDate.getTime()) / (1000 * 60 * 60 * 24));
-            if (daysDiff === 1) {
-              currentStreak++;
-              lastDate = dateString;
-            } else {
-              break;
-            }
-          }
-        }
-
-        // Determine activity level
-        const lastLoginDate = userData.lastLoginAt?.toDate?.() || userData.lastLoginAt;
-        const daysSinceLastLogin = lastLoginDate
-          ? Math.floor((new Date().getTime() - new Date(lastLoginDate).getTime()) / (1000 * 60 * 60 * 24))
-          : 999;
-
-        let activityLevel: 'Very Active' | 'Active' | 'Moderate' | 'Inactive' = 'Inactive';
-        if (daysSinceLastLogin <= 1 && totalQuizzes >= 5) {
-          activityLevel = 'Very Active';
-        } else if (daysSinceLastLogin <= 3 && totalQuizzes >= 3) {
-          activityLevel = 'Active';
-        } else if (daysSinceLastLogin <= 7 && totalQuizzes >= 1) {
-          activityLevel = 'Moderate';
-        }
-
-        // Extract user data with flexible field names
-        const extractedName = userData.name || userData.displayName || userData.fullName || userData.userName || 'Unknown User';
-        const extractedEmail = userData.email || userData.emailAddress || 'No email';
-        const extractedPhone = userData.phone || userData.phoneNumber || userData.mobile || '';
-        const extractedDesignation = userData.designation || userData.role || userData.jobTitle || 'Not specified';
-        const extractedOffice = userData.officeName || userData.office || userData.workplace || userData.location || 'Not specified';
-        const extractedCreatedAt = userData.createdAt?.toDate?.() || userData.createdAt || userData.registeredAt?.toDate?.() || userData.registeredAt || new Date();
-
-        const mobileUser: MobileUser = {
-          id: userDoc.id,
-          name: extractedName,
-          email: extractedEmail,
-          phone: extractedPhone,
-          designation: extractedDesignation,
-          officeName: extractedOffice,
-          registeredAt: extractedCreatedAt,
-          lastLoginAt: lastLoginDate,
-          isActive: daysSinceLastLogin <= 7,
-          totalQuizzes,
-          averageScore: Math.round(averageScore * 10) / 10,
-          currentStreak,
-          activityLevel,
-        };
-
-        realUsers.push(mobileUser);
-      }
-
-      // Calculate real statistics
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
-
-      const realStats: MobileUserStats = {
-        totalUsers: realUsers.length,
-        activeUsers: realUsers.filter(u => u.isActive).length,
-        newUsersThisMonth: realUsers.filter(u => {
-          const regDate = new Date(u.registeredAt);
-          return regDate.getMonth() === currentMonth && regDate.getFullYear() === currentYear;
-        }).length,
-        averageQuizzesPerUser: realUsers.length > 0
-          ? Math.round(realUsers.reduce((sum, u) => sum + u.totalQuizzes, 0) / realUsers.length)
-          : 0,
-        averageScore: realUsers.length > 0
-          ? Math.round(realUsers.reduce((sum, u) => sum + u.averageScore, 0) / realUsers.length * 10) / 10
-          : 0,
-        topPerformers: realUsers
-          .filter(u => u.totalQuizzes > 0) // Only users who have taken quizzes
-          .sort((a, b) => b.averageScore - a.averageScore)
-          .slice(0, 3),
+      const user: MobileUser = {
+        id: odocId,
+        name: userData.name || 'Unknown User',
+        email: userData.email || 'No email',
+        phone: userData.phoneNumber || userData.phone || 'Not provided',
+        designation: userData.designation || 'Not specified',
+        officeName: userData.officeName || 'Not specified',
+        registeredAt: userData.createdAt?.toDate?.() || new Date(),
+        lastLoginAt: lastLoginDate ? new Date(lastLoginDate) : undefined,
+        isActive: userData.isActive !== false,
+        ...userStats,
+        userType: userData.userType || 'mobile_user',
+        emailVerified: userData.emailVerified || false,
+        profileComplete: userData.profileComplete || false,
+        totalPaidAmount: userPaymentData.amount,
+        paidQuizCount: userPaymentData.count,
       };
 
-      // If no real users found, show some sample data for demonstration
-      if (realUsers.length === 0) {
-        console.log('⚠️ No users found in Firestore, showing sample data for demonstration');
-        const sampleUsers: MobileUser[] = [
-          {
-            id: 'sample-1',
-            name: 'Sample User 1',
-            email: 'sample1@example.com',
-            phone: '+91 9876543210',
-            designation: 'GDS',
-            officeName: 'Sample GPO',
-            registeredAt: new Date('2024-01-15'),
-            lastLoginAt: new Date('2024-01-20'),
-            isActive: true,
-            totalQuizzes: 5,
-            averageScore: 78.5,
-            currentStreak: 3,
-            activityLevel: 'Active',
-          },
-          {
-            id: 'sample-2',
-            name: 'Sample User 2',
-            email: 'sample2@example.com',
-            phone: '+91 9876543211',
-            designation: 'MTS',
-            officeName: 'Sample Central',
-            registeredAt: new Date('2024-01-10'),
-            lastLoginAt: new Date('2024-01-19'),
-            isActive: true,
-            totalQuizzes: 8,
-            averageScore: 82.3,
-            currentStreak: 5,
-            activityLevel: 'Very Active',
-          }
-        ];
+      realUsers.push(user);
+    });
 
-        const sampleStats: MobileUserStats = {
-          totalUsers: sampleUsers.length,
-          activeUsers: sampleUsers.filter(u => u.isActive).length,
-          newUsersThisMonth: 1,
-          averageQuizzesPerUser: 6,
-          averageScore: 80.4,
-          topPerformers: sampleUsers.sort((a, b) => b.averageScore - a.averageScore),
+    // Sort by last login (most recent first)
+    realUsers.sort((a, b) => {
+      const dateA = a.lastLoginAt?.getTime() || 0;
+      const dateB = b.lastLoginAt?.getTime() || 0;
+      return dateB - dateA;
+    });
+
+    setUsers(realUsers);
+    setLastUpdateTime(new Date());
+
+    // Update stats
+    const currentMonth = new Date();
+    const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const newUsersThisMonth = realUsers.filter(u => u.registeredAt >= firstDayOfMonth).length;
+    const totalQuizzes = realUsers.reduce((sum, u) => sum + u.totalQuizzes, 0);
+    const averageQuizzesPerUser = realUsers.length > 0 ? totalQuizzes / realUsers.length : 0;
+    const topPerformers = realUsers
+      .filter(u => u.totalQuizzes > 0)
+      .sort((a, b) => b.averageScore - a.averageScore)
+      .slice(0, 5);
+
+    // Calculate total revenue from paid orders
+    let totalRevenue = 0;
+    let totalPaidUsers = 0;
+    paidOrdersRef.current.forEach((data) => {
+      totalRevenue += data.amount;
+      totalPaidUsers++;
+    });
+
+    const newStats = {
+      totalUsers: realUsers.length,
+      activeUsers: realUsers.filter(u => u.activityLevel !== 'Inactive').length,
+      newUsersThisMonth,
+      averageQuizzesPerUser: Math.round(averageQuizzesPerUser * 10) / 10,
+      averageScore: realUsers.length > 0
+        ? Math.round((realUsers.reduce((sum, u) => sum + u.averageScore, 0) / realUsers.length) * 10) / 10
+        : 0,
+      topPerformers,
+      totalRevenue,
+      totalPaidUsers
+    };
+    setStats(newStats);
+
+    console.log(`✅ Built ${realUsers.length} users with real-time stats`);
+  }, [calculateUserStats]);
+
+  const setupRealtimeListeners = useCallback((): Unsubscribe[] => {
+    console.log('🔍 Setting up comprehensive real-time listeners...');
+    const unsubscribes: Unsubscribe[] = [];
+
+    // 1. Real-time listener for mobile_users collection
+    const mobileUsersRef = collection(db, 'mobile_users');
+    const usersQuery = query(mobileUsersRef, orderBy('createdAt', 'desc'));
+
+    const usersUnsubscribe = onSnapshot(usersQuery, (snapshot) => {
+      console.log(`📡 Real-time users update: ${snapshot.docs.length} mobile users`);
+      setIsRealTimeConnected(true);
+
+      // Update raw users ref
+      rawUsersRef.current.clear();
+      snapshot.docs.forEach((doc) => {
+        rawUsersRef.current.set(doc.id, doc.data());
+      });
+
+      // Rebuild users with current quiz attempts
+      buildUsersWithStats();
+      setLoading(false);
+    }, (error) => {
+      console.error('❌ Users listener error:', error);
+      setError('Failed to load mobile users: ' + error.message);
+      setIsRealTimeConnected(false);
+      setLoading(false);
+    });
+    unsubscribes.push(usersUnsubscribe);
+
+    // 2. Real-time listener for quiz_attempts collection
+    const attemptsRef = collection(db, 'quiz_attempts');
+    const attemptsQuery = query(attemptsRef, orderBy('attemptedAt', 'desc'));
+
+    const attemptsUnsubscribe = onSnapshot(attemptsQuery, (snapshot) => {
+      console.log(`📡 Real-time quiz attempts update: ${snapshot.docs.length} attempts`);
+
+      // Group attempts by user
+      quizAttemptsRef.current.clear();
+      const recentList: QuizAttempt[] = [];
+
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        const attempt: QuizAttempt = {
+          id: doc.id,
+          userId: data.userId || '',
+          examId: data.examId,
+          examCategory: data.examCategory,
+          category: data.category,
+          totalQuestions: data.totalQuestions || 0,
+          correctAnswers: data.correctAnswers || 0,
+          scorePercentage: data.scorePercentage || 0,
+          timeTaken: data.timeTaken || 0,
+          isCompleted: data.isCompleted || false,
+          attemptedAt: data.attemptedAt?.toDate?.() || (data.attemptedAt ? new Date(data.attemptedAt) : undefined),
+          completedAt: data.completedAt?.toDate?.() || (data.completedAt ? new Date(data.completedAt) : undefined),
         };
 
-        setUsers(sampleUsers);
-        setStats(sampleStats);
-      } else {
-        setUsers(realUsers);
-        setStats(realStats);
-      }
-
-      console.log(`✅ Loaded ${realUsers.length} real users + ${realUsers.length === 0 ? 2 : 0} sample users`);
-    } catch (error) {
-      console.error('❌ Error loading mobile users:', error);
-
-      // Show sample data on error for demonstration
-      const fallbackUsers: MobileUser[] = [
-        {
-          id: 'fallback-1',
-          name: 'Demo User (Firestore Error)',
-          email: 'demo@example.com',
-          phone: '+91 9999999999',
-          designation: 'GDS',
-          officeName: 'Demo Office',
-          registeredAt: new Date(),
-          lastLoginAt: new Date(),
-          isActive: true,
-          totalQuizzes: 3,
-          averageScore: 75.0,
-          currentStreak: 1,
-          activityLevel: 'Active',
+        // Add to user's attempts
+        const userId = attempt.userId;
+        if (userId) {
+          if (!quizAttemptsRef.current.has(userId)) {
+            quizAttemptsRef.current.set(userId, []);
+          }
+          quizAttemptsRef.current.get(userId)!.push(attempt);
         }
-      ];
 
-      setUsers(fallbackUsers);
-      setStats({
-        totalUsers: 1,
-        activeUsers: 1,
-        newUsersThisMonth: 1,
-        averageQuizzesPerUser: 3,
-        averageScore: 75.0,
-        topPerformers: fallbackUsers,
+        // Track recent activities (last 10)
+        if (recentList.length < 10) {
+          recentList.push(attempt);
+        }
       });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+
+      setRecentActivities(recentList);
+
+      // Rebuild users with updated quiz attempts
+      if (rawUsersRef.current.size > 0) {
+        buildUsersWithStats();
+      }
+    }, (error) => {
+      console.error('❌ Quiz attempts listener error:', error);
+    });
+    unsubscribes.push(attemptsUnsubscribe);
+
+    // 3. Real-time listener for paid orders (status = 'paid')
+    const ordersRef = collection(db, 'orders');
+    const paidOrdersQuery = query(ordersRef, where('status', '==', 'paid'));
+
+    const ordersUnsubscribe = onSnapshot(paidOrdersQuery, (snapshot) => {
+      console.log(`📡 Real-time paid orders update: ${snapshot.docs.length} paid orders`);
+
+      // Group paid orders by user and sum amounts
+      paidOrdersRef.current.clear();
+
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        const userId = data.userId;
+        const amount = data.amount || 0; // amount in rupees
+
+        if (userId) {
+          const existing = paidOrdersRef.current.get(userId) || { amount: 0, count: 0 };
+          paidOrdersRef.current.set(userId, {
+            amount: existing.amount + amount,
+            count: existing.count + 1
+          });
+        }
+      });
+
+      console.log(`💰 Calculated paid amounts for ${paidOrdersRef.current.size} users`);
+
+      // Rebuild users with updated payment data
+      if (rawUsersRef.current.size > 0) {
+        buildUsersWithStats();
+      }
+    }, (error) => {
+      console.error('❌ Orders listener error:', error);
+    });
+    unsubscribes.push(ordersUnsubscribe);
+
+    console.log('✅ All real-time listeners set up');
+    return unsubscribes;
+  }, [buildUsersWithStats]);
 
   useEffect(() => {
-    // Set up real-time listener
-    const unsubscribe = setupRealtimeListener();
+    // Set up real-time listeners for both mobile_users and quiz_attempts
+    const unsubscribes = setupRealtimeListeners();
 
     // Cleanup function to unsubscribe when component unmounts
     return () => {
-      if (unsubscribe) {
+      unsubscribes.forEach((unsubscribe) => {
         unsubscribe();
-        console.log('🔌 Unsubscribed from real-time listener');
-      }
+      });
+      console.log('🔌 Unsubscribed from all real-time listeners');
     };
-  }, [setupRealtimeListener]);
+  }, [setupRealtimeListeners]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -615,20 +540,57 @@ const MobileUsersPage: React.FC = () => {
           <Typography variant="h4" component="h1">
             📱 Mobile User Management
           </Typography>
+          {/* Real-time status indicator */}
+          <Tooltip title={isRealTimeConnected
+            ? `Real-time updates active${lastUpdateTime ? ` - Last update: ${lastUpdateTime.toLocaleTimeString()}` : ''}`
+            : 'Connecting to real-time updates...'
+          }>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Badge
+                overlap="circular"
+                badgeContent=""
+                variant="dot"
+                sx={{
+                  '& .MuiBadge-badge': {
+                    backgroundColor: isRealTimeConnected ? '#44b700' : '#ff9800',
+                    color: isRealTimeConnected ? '#44b700' : '#ff9800',
+                    boxShadow: `0 0 0 2px white`,
+                    animation: isRealTimeConnected ? 'pulse 2s infinite' : 'none',
+                    '@keyframes pulse': {
+                      '0%': { transform: 'scale(1)' },
+                      '50%': { transform: 'scale(1.2)' },
+                      '100%': { transform: 'scale(1)' },
+                    },
+                  },
+                }}
+              >
+                <FiberManualRecord sx={{ fontSize: 12, color: isRealTimeConnected ? 'success.main' : 'warning.main' }} />
+              </Badge>
+              <Typography variant="caption" color={isRealTimeConnected ? 'success.main' : 'warning.main'}>
+                {isRealTimeConnected ? 'Live' : 'Connecting...'}
+              </Typography>
+            </Box>
+          </Tooltip>
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<Refresh />}
-          onClick={() => {
-            console.log('🔄 Manual refresh triggered');
-            // The real-time listener will automatically update the data
-            // But we can also trigger a manual refresh if needed
-            setLoading(true);
-            setTimeout(() => setLoading(false), 1000);
-          }}
-        >
-          Refresh
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {lastUpdateTime && (
+            <Typography variant="caption" color="text.secondary">
+              Last updated: {lastUpdateTime.toLocaleTimeString()}
+            </Typography>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => {
+              console.log('🔄 Manual refresh triggered');
+              // The real-time listener automatically handles updates
+              // This button provides visual feedback to the user
+              buildUsersWithStats();
+            }}
+          >
+            Refresh
+          </Button>
+        </Box>
       </Box>
 
       {/* Statistics Cards */}
@@ -674,6 +636,15 @@ const MobileUsersPage: React.FC = () => {
               value={`${stats.averageScore}%`}
               icon={<Star />}
               color="secondary"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={2.4}>
+            <StatCard
+              title="Total Revenue"
+              value={`₹${stats.totalRevenue.toLocaleString('en-IN')}`}
+              subtitle={`${stats.totalPaidUsers} paying users`}
+              icon={<CurrencyRupee />}
+              color="success"
             />
           </Grid>
         </Grid>
@@ -777,6 +748,7 @@ const MobileUsersPage: React.FC = () => {
                     <TableCell>Quizzes</TableCell>
                     <TableCell>Avg Score</TableCell>
                     <TableCell>Streak</TableCell>
+                    <TableCell>Paid Amount</TableCell>
                     <TableCell>Last Login</TableCell>
                     <TableCell>Actions</TableCell>
                   </TableRow>
@@ -850,11 +822,48 @@ const MobileUsersPage: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">
-                          {user.lastLoginAt
-                            ? new Date(user.lastLoginAt).toLocaleDateString()
-                            : 'Never'}
-                        </Typography>
+                        <Tooltip title={user.paidQuizCount
+                          ? `${user.paidQuizCount} quiz${user.paidQuizCount > 1 ? 'es' : ''} purchased`
+                          : 'No paid quizzes'
+                        }>
+                          <Box>
+                            {user.totalPaidAmount && user.totalPaidAmount > 0 ? (
+                              <Chip
+                                label={`₹${user.totalPaidAmount.toFixed(0)}`}
+                                color="success"
+                                size="small"
+                                variant="outlined"
+                              />
+                            ) : (
+                              <Typography variant="caption" color="text.secondary">
+                                ₹0
+                              </Typography>
+                            )}
+                          </Box>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title={user.lastLoginAt
+                          ? new Date(user.lastLoginAt).toLocaleString('en-IN', {
+                              timeZone: 'Asia/Kolkata',
+                              dateStyle: 'full',
+                              timeStyle: 'medium'
+                            })
+                          : 'Never logged in'
+                        }>
+                          <Typography variant="body2">
+                            {user.lastLoginAt
+                              ? new Date(user.lastLoginAt).toLocaleString('en-IN', {
+                                  timeZone: 'Asia/Kolkata',
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })
+                              : 'Never'}
+                          </Typography>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <Tooltip title="View Mobile User Analytics">
@@ -961,96 +970,137 @@ const MobileUsersPage: React.FC = () => {
         </TabPanel>
 
         <TabPanel value={tabValue} index={2}>
-          <Typography variant="h6" gutterBottom>
-            📊 Recent Activity & Debug Info
-          </Typography>
-          <Alert severity="info" sx={{ mb: 3 }}>
-            Recent activity tracking will be implemented with real-time data from the mobile app.
-          </Alert>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              📊 Recent Quiz Activity (Real-time)
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <FiberManualRecord sx={{ fontSize: 12, color: isRealTimeConnected ? 'success.main' : 'warning.main' }} />
+              <Typography variant="caption" color={isRealTimeConnected ? 'success.main' : 'warning.main'}>
+                {isRealTimeConnected ? 'Live updates active' : 'Connecting...'}
+              </Typography>
+            </Box>
+          </Box>
 
-          {/* Debug Information */}
-          <Card>
+          {recentActivities.length === 0 ? (
+            <Alert severity="info" sx={{ mb: 3 }}>
+              No recent quiz activity found. Activities will appear here in real-time when users take quizzes.
+            </Alert>
+          ) : (
+            <TableContainer component={Paper}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>User</TableCell>
+                    <TableCell>Quiz Category</TableCell>
+                    <TableCell align="center">Score</TableCell>
+                    <TableCell align="center">Questions</TableCell>
+                    <TableCell align="center">Time Taken</TableCell>
+                    <TableCell>Completed At</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {recentActivities.map((activity) => {
+                    const user = users.find(u => u.id === activity.userId);
+                    return (
+                      <TableRow key={activity.id} hover>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Avatar sx={{ width: 32, height: 32, mr: 1, bgcolor: 'primary.main', fontSize: '0.875rem' }}>
+                              {user?.name?.charAt(0).toUpperCase() || 'U'}
+                            </Avatar>
+                            <Box>
+                              <Typography variant="body2" fontWeight="medium">
+                                {user?.name || 'Unknown User'}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {user?.email || activity.userId}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={activity.examCategory || activity.category || 'General'}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography
+                            variant="body2"
+                            fontWeight="bold"
+                            color={activity.scorePercentage >= 80 ? 'success.main' : activity.scorePercentage >= 60 ? 'warning.main' : 'error.main'}
+                          >
+                            {activity.scorePercentage.toFixed(1)}%
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2">
+                            {activity.correctAnswers}/{activity.totalQuestions}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2">
+                            {Math.floor(activity.timeTaken / 60)}m {activity.timeTaken % 60}s
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {activity.completedAt
+                              ? activity.completedAt.toLocaleDateString() + ' ' + activity.completedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              : activity.attemptedAt
+                                ? activity.attemptedAt.toLocaleDateString() + ' ' + activity.attemptedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : 'N/A'
+                            }
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={activity.isCompleted ? 'Completed' : 'In Progress'}
+                            size="small"
+                            color={activity.isCompleted ? 'success' : 'warning'}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+
+          {/* Real-time Stats Summary */}
+          <Card sx={{ mt: 3 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                🔧 Debug Information
+                🔄 Real-time Connection Status
               </Typography>
-              <Typography variant="body2" paragraph>
-                <strong>Total Users Found:</strong> {users.length}
-              </Typography>
-              <Typography variant="body2" paragraph>
-                <strong>Data Source:</strong> {users.length > 0 && users[0].id.startsWith('sample') ? 'Sample Data (No Firestore Users)' :
-                                                users.length > 0 && users[0].id.startsWith('fallback') ? 'Fallback Data (Firestore Error)' :
-                                                users.length > 0 ? 'Real Firestore Data' : 'No Data'}
-              </Typography>
-
-              {/* Debug Information */}
-              {debugInfo.collectionsChecked.length > 0 && (
-                <>
-                  <Typography variant="body2" paragraph>
-                    <strong>Collections Checked:</strong> {debugInfo.collectionsChecked.join(', ')}
+              <Grid container spacing={2}>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Connection Status</Typography>
+                  <Chip
+                    label={isRealTimeConnected ? 'Connected' : 'Disconnected'}
+                    color={isRealTimeConnected ? 'success' : 'error'}
+                    size="small"
+                  />
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Total Users Loaded</Typography>
+                  <Typography variant="h6">{users.length}</Typography>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Quiz Attempts Tracked</Typography>
+                  <Typography variant="h6">{recentActivities.length}</Typography>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Last Update</Typography>
+                  <Typography variant="body2">
+                    {lastUpdateTime ? lastUpdateTime.toLocaleTimeString() : 'Never'}
                   </Typography>
-                  <Typography variant="body2" paragraph>
-                    <strong>Documents Found:</strong> {debugInfo.documentsFound}
-                  </Typography>
-                  {debugInfo.sampleDocument && (
-                    <>
-                      <Typography variant="body2" paragraph>
-                        <strong>Sample Document from {debugInfo.sampleDocument.collection}:</strong>
-                      </Typography>
-                      <Box component="pre" sx={{
-                        backgroundColor: 'grey.100',
-                        p: 2,
-                        borderRadius: 1,
-                        fontSize: '0.75rem',
-                        overflow: 'auto',
-                        maxHeight: 200
-                      }}>
-                        {JSON.stringify(debugInfo.sampleDocument.data, null, 2)}
-                      </Box>
-                    </>
-                  )}
-                  {debugInfo.errors.length > 0 && (
-                    <>
-                      <Typography variant="body2" paragraph>
-                        <strong>Errors:</strong>
-                      </Typography>
-                      <ul>
-                        {debugInfo.errors.map((error, index) => (
-                          <li key={index}><Typography variant="caption">{error}</Typography></li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </>
-              )}
-              <Typography variant="body2" paragraph>
-                <strong>Expected Firestore Collections:</strong>
-              </Typography>
-              <ul>
-                <li><code>users</code> - Mobile app user profiles</li>
-                <li><code>user_analytics</code> - User performance analytics</li>
-                <li><code>quiz_attempts</code> - Individual quiz attempt records</li>
-              </ul>
-              <Typography variant="body2" paragraph>
-                <strong>Expected User Document Fields:</strong>
-              </Typography>
-              <ul>
-                <li><code>name</code> or <code>displayName</code> - User's name</li>
-                <li><code>email</code> - User's email address</li>
-                <li><code>phone</code> or <code>phoneNumber</code> - Phone number</li>
-                <li><code>designation</code> - Job role (GDS, MTS, etc.)</li>
-                <li><code>officeName</code> - Workplace</li>
-                <li><code>createdAt</code> - Registration timestamp</li>
-                <li><code>lastLoginAt</code> - Last login timestamp</li>
-              </ul>
-              <Alert severity="warning" sx={{ mt: 2 }}>
-                If you're seeing sample/fallback data, it means either:
-                <br />• No users exist in the Firestore 'users' collection
-                <br />• There was an error connecting to Firestore
-                <br />• The user documents don't have the expected field structure
-                <br /><br />
-                Check the browser console for detailed error messages.
-              </Alert>
+                </Grid>
+              </Grid>
             </CardContent>
           </Card>
         </TabPanel>

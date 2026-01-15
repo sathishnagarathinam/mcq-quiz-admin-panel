@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -23,6 +23,8 @@ import {
   CircularProgress,
   Alert,
   Divider,
+  Badge,
+  Tooltip,
 } from '@mui/material';
 import {
   Quiz,
@@ -30,8 +32,10 @@ import {
   Star,
   LocalFireDepartment,
   Person,
+  FiberManualRecord,
+  Sync,
 } from '@mui/icons-material';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 
 interface UserAnalytics {
@@ -98,23 +102,13 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
+  const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  const unsubscribeRef = useRef<Unsubscribe | null>(null);
 
-
-
-  const fetchRealUserAnalytics = useCallback(async (): Promise<UserAnalytics> => {
-    console.log(`🔍 Fetching real analytics for user: ${userId} (${userName})`);
-
-    // Fetch user's quiz attempts
-    const attemptsRef = collection(db, 'quiz_attempts');
-    const userAttemptsQuery = query(attemptsRef, where('userId', '==', userId));
-    const attemptsSnapshot = await getDocs(userAttemptsQuery);
-
-    const userAttempts = attemptsSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as any[];
-
-    console.log(`📋 Found ${userAttempts.length} quiz attempts for user ${userId}`);
+  // Calculate analytics from quiz attempts
+  const calculateAnalyticsFromAttempts = useCallback((userAttempts: any[]): UserAnalytics => {
+    console.log(`📋 Calculating analytics from ${userAttempts.length} quiz attempts for user ${userId}`);
 
     // Calculate statistics from real data
     const totalQuizzesAttempted = userAttempts.length;
@@ -202,47 +196,27 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
       categoryScores[category] = scores.reduce((sum, score) => sum + score, 0) / scores.length;
     });
 
-    // Recent scores (last 5) with enhanced data
-    const recentScores = await Promise.all(
-      sortedAttempts.slice(0, 5).map(async (attempt: any) => {
-        const score = attempt.scorePercentage || 0;
-        let quizName = 'Unknown Quiz';
-        let examType = attempt.examCategory || attempt.category || 'Quiz';
+    // Recent scores (last 5) with enhanced data - synchronous for real-time updates
+    const recentScores = sortedAttempts.slice(0, 5).map((attempt: any) => {
+      const score = attempt.scorePercentage || 0;
+      const quizName = attempt.examName || attempt.quizName || 'Quiz';
+      const examType = attempt.examCategory || attempt.category || 'Quiz';
 
-        // Try to get quiz name from exam collection
-        try {
-          if (attempt.examId) {
-            const examQuery = query(
-              collection(db, 'exams'),
-              where('__name__', '==', attempt.examId)
-            );
-            const examSnapshot = await getDocs(examQuery);
-            if (!examSnapshot.empty) {
-              const examData = examSnapshot.docs[0].data();
-              quizName = examData.name || examData.title || 'Unknown Quiz';
-              examType = examData.examType || examData.category || examType;
-            }
-          }
-        } catch (error) {
-          console.warn('Could not fetch exam details for attempt:', attempt.examId);
-        }
+      // Calculate performance label
+      const performance = score >= 90 ? 'Excellent' :
+                        score >= 80 ? 'Very Good' :
+                        score >= 70 ? 'Good' :
+                        score >= 60 ? 'Average' :
+                        score >= 50 ? 'Below Average' : 'Needs Improvement';
 
-        // Calculate performance label
-        const performance = score >= 90 ? 'Excellent' :
-                          score >= 80 ? 'Very Good' :
-                          score >= 70 ? 'Good' :
-                          score >= 60 ? 'Average' :
-                          score >= 50 ? 'Below Average' : 'Needs Improvement';
-
-        return {
-          score,
-          date: new Date(attempt.completedAt?.toDate?.() || attempt.completedAt),
-          examType,
-          quizName,
-          performance
-        };
-      })
-    );
+      return {
+        score,
+        date: new Date(attempt.completedAt?.toDate?.() || attempt.completedAt || new Date()),
+        examType,
+        quizName,
+        performance
+      };
+    });
 
     // Activity level calculation
     let activityLevel: 'Very Active' | 'Active' | 'Moderate' | 'Inactive' = 'Inactive';
@@ -311,118 +285,60 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
     return realAnalytics;
   }, [userId, userName, userEmail]);
 
-  const loadUserAnalytics = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  // Set up real-time listener for user's quiz attempts
+  const setupRealtimeListener = useCallback(() => {
+    if (!userId) return;
 
-      // Try to fetch real data first
-      try {
-        const realAnalytics = await fetchRealUserAnalytics();
-        setAnalytics(realAnalytics);
-        return;
-      } catch (realDataError) {
-        console.log('⚠️ Could not fetch real user analytics, using mock data:', realDataError);
-      }
+    console.log(`🔍 Setting up real-time analytics listener for user: ${userId}`);
+    setLoading(true);
+    setError(null);
 
-      // Fallback to mock data
-      const mockAnalytics: UserAnalytics = {
-        userId,
-        userName,
-        userEmail,
-        statistics: {
-          totalQuizzesAttempted: 45,
-          totalQuizzesCompleted: 42,
-          totalQuestionsAnswered: 1260,
-          totalCorrectAnswers: 987,
-          totalTimeSpent: 18900, // in seconds
-          currentStreak: 7,
-          longestStreak: 12,
-          lastQuizDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-        },
-        performance: {
-          bestScore: 95.5,
-          averageScore: 78.3,
-          worstScore: 45.0,
-          bestTime: 180, // in seconds
-          averageTime: 420,
-          categoryScores: {
-            'Postal Guide': 82.5,
-            'Postal Volumes': 75.8,
-            'General Knowledge': 80.2,
-            'Current Affairs': 72.1,
-          },
-          recentScores: [
-            {
-              score: 85,
-              date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-              examType: 'Postal Guide',
-              quizName: 'Postal Guide Chapter 1 - Basic Concepts',
-              performance: 'Very Good'
-            },
-            {
-              score: 78,
-              date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-              examType: 'Postal Volumes',
-              quizName: 'Postal Volumes and Calculations',
-              performance: 'Good'
-            },
-            {
-              score: 92,
-              date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-              examType: 'General Knowledge',
-              quizName: 'Current Affairs and GK Quiz',
-              performance: 'Excellent'
-            },
-            {
-              score: 67,
-              date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-              examType: 'Postal Guide',
-              quizName: 'Postal Guide Chapter 2 - Advanced Topics',
-              performance: 'Average'
-            },
-            {
-              score: 88,
-              date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
-              examType: 'Current Affairs',
-              quizName: 'Monthly Current Affairs Test',
-              performance: 'Very Good'
-            },
-          ],
-        },
-        activity: {
-          loginCount: 156,
-          lastLoginDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-          sessionsThisWeek: 8,
-          sessionsThisMonth: 28,
-          averageSessionDuration: 25.5,
-          activityLevel: 'Very Active',
-        },
-        progress: {
-          currentLevel: 'Advanced',
-          levelProgress: 65.5,
-          experiencePoints: 2850,
-          achievements: ['First Quiz', 'Quiz Master', 'Streak Master', 'High Scorer'],
-          rank: 23,
-        },
-      };
-
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setAnalytics(mockAnalytics);
-    } catch (err) {
-      setError('Failed to load user analytics');
-      console.error('Error loading user analytics:', err);
-    } finally {
-      setLoading(false);
+    // Clean up previous listener
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
     }
-  }, [userId, userEmail, userName, fetchRealUserAnalytics]);
+
+    const attemptsRef = collection(db, 'quiz_attempts');
+    const userAttemptsQuery = query(attemptsRef, where('userId', '==', userId));
+
+    const unsubscribe = onSnapshot(userAttemptsQuery, (snapshot) => {
+      console.log(`📡 Real-time analytics update: ${snapshot.docs.length} attempts for user ${userId}`);
+      setIsRealTimeConnected(true);
+      setLastUpdateTime(new Date());
+
+      const userAttempts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      const calculatedAnalytics = calculateAnalyticsFromAttempts(userAttempts);
+      setAnalytics(calculatedAnalytics);
+      setLoading(false);
+    }, (error) => {
+      console.error('❌ Real-time analytics listener error:', error);
+      setError('Failed to load user analytics: ' + error.message);
+      setIsRealTimeConnected(false);
+      setLoading(false);
+    });
+
+    unsubscribeRef.current = unsubscribe;
+    return unsubscribe;
+  }, [userId, calculateAnalyticsFromAttempts]);
 
   useEffect(() => {
     if (open && userId) {
-      loadUserAnalytics();
+      setupRealtimeListener();
     }
-  }, [open, userId, loadUserAnalytics]);
+
+    // Cleanup on close or unmount
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+        console.log('🔌 Unsubscribed from user analytics listener');
+      }
+    };
+  }, [open, userId, setupRealtimeListener]);
 
   const StatCard: React.FC<{
     title: string;
@@ -516,15 +432,53 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Person sx={{ mr: 1 }} />
-          Mobile User Analytics - {analytics.userName}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Person sx={{ mr: 1 }} />
+            Mobile User Analytics - {analytics.userName}
+          </Box>
+          {/* Real-time status indicator */}
+          <Tooltip title={isRealTimeConnected
+            ? `Real-time updates active${lastUpdateTime ? ` - Last update: ${lastUpdateTime.toLocaleTimeString()}` : ''}`
+            : 'Connecting to real-time updates...'
+          }>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Badge
+                overlap="circular"
+                badgeContent=""
+                variant="dot"
+                sx={{
+                  '& .MuiBadge-badge': {
+                    backgroundColor: isRealTimeConnected ? '#44b700' : '#ff9800',
+                    color: isRealTimeConnected ? '#44b700' : '#ff9800',
+                    boxShadow: `0 0 0 2px white`,
+                    animation: isRealTimeConnected ? 'pulse 2s infinite' : 'none',
+                    '@keyframes pulse': {
+                      '0%': { transform: 'scale(1)' },
+                      '50%': { transform: 'scale(1.2)' },
+                      '100%': { transform: 'scale(1)' },
+                    },
+                  },
+                }}
+              >
+                <Sync sx={{ fontSize: 16, color: isRealTimeConnected ? 'success.main' : 'warning.main' }} />
+              </Badge>
+              <Typography variant="caption" color={isRealTimeConnected ? 'success.main' : 'warning.main'}>
+                {isRealTimeConnected ? 'Live' : 'Connecting...'}
+              </Typography>
+            </Box>
+          </Tooltip>
         </Box>
         <Typography variant="body2" color="text.secondary">
           {analytics.userEmail}
+          {lastUpdateTime && (
+            <Typography component="span" variant="caption" sx={{ ml: 2 }}>
+              • Last updated: {lastUpdateTime.toLocaleTimeString()}
+            </Typography>
+          )}
         </Typography>
       </DialogTitle>
-      
+
       <DialogContent>
         <Box sx={{ mt: 2 }}>
           {/* Overview Stats */}
@@ -726,10 +680,10 @@ const UserAnalyticsDialog: React.FC<UserAnalyticsDialogProps> = ({
                     >
                       <TableCell>
                         <Typography variant="body2" fontWeight="medium">
-                          {score.date.toLocaleDateString()}
+                          {score.date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {score.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {score.date.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}
                         </Typography>
                       </TableCell>
                       <TableCell>

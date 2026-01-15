@@ -51,6 +51,7 @@ const analytics_1 = require("./routes/analytics");
 const users_1 = require("./routes/users");
 const notifications_1 = require("./routes/notifications");
 const fcm_cleanup_1 = require("./routes/fcm-cleanup");
+const payments_1 = require("./routes/payments");
 // Initialize Firebase Admin
 admin.initializeApp();
 // Initialize Express app
@@ -69,6 +70,7 @@ app.use('/analytics', analytics_1.analyticsRoutes);
 app.use('/users', users_1.userRoutes);
 app.use('/notifications', notifications_1.notificationRoutes);
 app.use('/fcm-cleanup', fcm_cleanup_1.fcmCleanupRoutes);
+app.use('/payments', payments_1.paymentRoutes);
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).json({
