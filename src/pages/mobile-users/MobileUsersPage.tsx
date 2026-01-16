@@ -26,6 +26,10 @@ import {
   Tabs,
   Tab,
   Badge,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 
 } from '@mui/material';
 import {
@@ -42,12 +46,14 @@ import {
   ArrowBack,
   CurrencyRupee,
   Download as DownloadIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, onSnapshot, orderBy, where, Unsubscribe } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, where, Unsubscribe, deleteDoc, doc, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import UserAnalyticsDialog from '../../components/admin/UserAnalyticsDialog';
 import * as XLSX from 'xlsx';
+import toast from 'react-hot-toast';
 
 interface QuizAttempt {
   id: string;
@@ -137,6 +143,9 @@ const MobileUsersPage: React.FC = () => {
   const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
   const [recentActivities, setRecentActivities] = useState<QuizAttempt[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<MobileUser | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Store quiz attempts for real-time user stats calculation
   const quizAttemptsRef = useRef<Map<string, QuizAttempt[]>>(new Map());
@@ -527,6 +536,96 @@ const MobileUsersPage: React.FC = () => {
     } catch (error) {
       console.error('Error exporting to Excel:', error);
       alert('Failed to export data to Excel. Please try again.');
+    }
+  };
+
+  const handleDeleteUser = (user: MobileUser) => {
+    setUserToDelete(user);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      const userId = userToDelete.id;
+      console.log(`🗑️ Starting deletion process for user: ${userId}`);
+
+      // Delete user document from users collection
+      await deleteDoc(doc(db, 'users', userId));
+      console.log(`✓ Deleted user document: ${userId}`);
+
+      // Delete all quiz attempts for this user
+      const quizAttemptsRef = collection(db, 'quizAttempts');
+      const quizAttemptsQuery = query(quizAttemptsRef, where('userId', '==', userId));
+      const quizAttemptsSnapshot = await getDocs(quizAttemptsQuery);
+
+      for (const docSnapshot of quizAttemptsSnapshot.docs) {
+        await deleteDoc(doc(db, 'quizAttempts', docSnapshot.id));
+      }
+      console.log(`✓ Deleted ${quizAttemptsSnapshot.docs.length} quiz attempts`);
+
+      // Delete all paid orders for this user
+      const paidOrdersRef = collection(db, 'paidOrders');
+      const paidOrdersQuery = query(paidOrdersRef, where('userId', '==', userId));
+      const paidOrdersSnapshot = await getDocs(paidOrdersQuery);
+
+      for (const docSnapshot of paidOrdersSnapshot.docs) {
+        await deleteDoc(doc(db, 'paidOrders', docSnapshot.id));
+      }
+      console.log(`✓ Deleted ${paidOrdersSnapshot.docs.length} paid orders`);
+
+      // Delete all device registrations for this user
+      const deviceRegistrationsRef = collection(db, 'deviceRegistrations');
+      const deviceRegistrationsQuery = query(deviceRegistrationsRef, where('userId', '==', userId));
+      const deviceRegistrationsSnapshot = await getDocs(deviceRegistrationsQuery);
+
+      for (const docSnapshot of deviceRegistrationsSnapshot.docs) {
+        await deleteDoc(doc(db, 'deviceRegistrations', docSnapshot.id));
+      }
+      console.log(`✓ Deleted ${deviceRegistrationsSnapshot.docs.length} device registrations`);
+
+      // Delete all notifications for this user
+      const notificationsRef = collection(db, 'notifications');
+      const notificationsQuery = query(notificationsRef, where('userId', '==', userId));
+      const notificationsSnapshot = await getDocs(notificationsQuery);
+
+      for (const docSnapshot of notificationsSnapshot.docs) {
+        await deleteDoc(doc(db, 'notifications', docSnapshot.id));
+      }
+      console.log(`✓ Deleted ${notificationsSnapshot.docs.length} notifications`);
+
+      // Delete all feedback for this user
+      const feedbackRef = collection(db, 'feedback');
+      const feedbackQuery = query(feedbackRef, where('userId', '==', userId));
+      const feedbackSnapshot = await getDocs(feedbackQuery);
+
+      for (const docSnapshot of feedbackSnapshot.docs) {
+        await deleteDoc(doc(db, 'feedback', docSnapshot.id));
+      }
+      console.log(`✓ Deleted ${feedbackSnapshot.docs.length} feedback entries`);
+
+      // Delete all user sessions
+      const sessionsRef = collection(db, 'userSessions');
+      const sessionsQuery = query(sessionsRef, where('userId', '==', userId));
+      const sessionsSnapshot = await getDocs(sessionsQuery);
+
+      for (const docSnapshot of sessionsSnapshot.docs) {
+        await deleteDoc(doc(db, 'userSessions', docSnapshot.id));
+      }
+      console.log(`✓ Deleted ${sessionsSnapshot.docs.length} user sessions`);
+
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
+
+      toast.success(`User "${userToDelete.name}" and all related data deleted successfully!`);
+      console.log(`✅ User deletion completed for: ${userId}`);
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast.error(`Failed to delete user: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -949,14 +1048,25 @@ const MobileUsersPage: React.FC = () => {
                         </Tooltip>
                       </TableCell>
                       <TableCell>
-                        <Tooltip title="View Mobile User Analytics">
-                          <IconButton
-                            size="small"
-                            onClick={() => handleViewAnalytics(user)}
-                          >
-                            <Analytics />
-                          </IconButton>
-                        </Tooltip>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Tooltip title="View Mobile User Analytics">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleViewAnalytics(user)}
+                            >
+                              <Analytics />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete User and All Related Data">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleDeleteUser(user)}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1202,6 +1312,106 @@ const MobileUsersPage: React.FC = () => {
           userEmail={selectedUser.email}
         />
       )}
+
+      {/* Delete User Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setDeleteDialogOpen(false);
+            setUserToDelete(null);
+          }
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ color: 'error.main', fontWeight: 'bold' }}>
+          Delete User Account
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            ⚠️ This action cannot be undone!
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Are you sure you want to delete the user account for:
+          </Typography>
+          {userToDelete && (
+            <Box sx={{
+              p: 2,
+              bgcolor: 'background.default',
+              borderRadius: 1,
+              mb: 2,
+              border: '1px solid',
+              borderColor: 'divider'
+            }}>
+              <Typography variant="subtitle2" fontWeight="bold">
+                {userToDelete.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {userToDelete.email}
+              </Typography>
+              {userToDelete.phone && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {userToDelete.phone}
+                </Typography>
+              )}
+            </Box>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            The following data will be permanently deleted:
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <Typography component="li" variant="body2" color="text.secondary">
+              User account and profile information
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              All quiz attempts and scores ({userToDelete?.totalQuizzes || 0} quizzes)
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              All paid orders and payment records
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Device registrations and push notification tokens
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              User feedback and notifications
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              User sessions and activity logs
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="error" fontWeight="bold">
+            This action is permanent and cannot be reversed.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={() => {
+              setDeleteDialogOpen(false);
+              setUserToDelete(null);
+            }}
+            disabled={isDeleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmDeleteUser}
+            variant="contained"
+            color="error"
+            disabled={isDeleting}
+            sx={{ minWidth: 120 }}
+          >
+            {isDeleting ? (
+              <>
+                <CircularProgress size={20} sx={{ mr: 1 }} />
+                Deleting...
+              </>
+            ) : (
+              'Delete User'
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
