@@ -70,9 +70,7 @@ android {
 
         // Additional manifest placeholders
         manifestPlaceholders = [
-            applicationName: "io.flutter.app.FlutterApplication",
-            // Declare 16KB page size support
-            supportsPageSize16KB: "true"
+            applicationName: "io.flutter.app.FlutterApplication"
         ]
     }
 
@@ -115,6 +113,11 @@ android {
         jniLibs {
             useLegacyPackaging false  // Use uncompressed native libraries for better performance
         }
+    }
+
+    // Enable 16 KB page size support for Android 15+
+    androidResources {
+        noCompress 'so'  // Don't compress native libraries
     }
 
     buildTypes {
