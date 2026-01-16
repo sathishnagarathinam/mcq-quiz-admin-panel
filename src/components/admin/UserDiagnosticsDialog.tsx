@@ -158,19 +158,6 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
     setLoading(false);
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'success':
-        return CheckIcon;
-      case 'warning':
-        return WarningIcon;
-      case 'error':
-        return ErrorIcon;
-      default:
-        return undefined;
-    }
-  };
-
   const getStatusColor = (status: string): any => {
     switch (status) {
       case 'success':
@@ -212,13 +199,33 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
                     <TableRow key={index}>
                       <TableCell>{result.check}</TableCell>
                       <TableCell align="center">
-                        <Chip
-                          icon={getStatusIcon(result.status)}
-                          label={result.status.toUpperCase()}
-                          color={getStatusColor(result.status)}
-                          size="small"
-                          variant="outlined"
-                        />
+                        {result.status === 'success' && (
+                          <Chip
+                            icon={<CheckIcon />}
+                            label={result.status.toUpperCase()}
+                            color={getStatusColor(result.status)}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
+                        {result.status === 'warning' && (
+                          <Chip
+                            icon={<WarningIcon />}
+                            label={result.status.toUpperCase()}
+                            color={getStatusColor(result.status)}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
+                        {result.status === 'error' && (
+                          <Chip
+                            icon={<ErrorIcon />}
+                            label={result.status.toUpperCase()}
+                            color={getStatusColor(result.status)}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">{result.message}</Typography>
