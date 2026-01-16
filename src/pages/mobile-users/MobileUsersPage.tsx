@@ -47,11 +47,13 @@ import {
   CurrencyRupee,
   Download as DownloadIcon,
   Delete as DeleteIcon,
+  Troubleshoot as TroubleshootIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, onSnapshot, orderBy, where, Unsubscribe, deleteDoc, doc, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import UserAnalyticsDialog from '../../components/admin/UserAnalyticsDialog';
+import UserDiagnosticsDialog from '../../components/admin/UserDiagnosticsDialog';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
@@ -146,6 +148,8 @@ const MobileUsersPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<MobileUser | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [diagnosticsDialogOpen, setDiagnosticsDialogOpen] = useState(false);
+  const [userForDiagnostics, setUserForDiagnostics] = useState<MobileUser | null>(null);
 
   // Store quiz attempts for real-time user stats calculation
   const quizAttemptsRef = useRef<Map<string, QuizAttempt[]>>(new Map());
@@ -542,6 +546,11 @@ const MobileUsersPage: React.FC = () => {
   const handleDeleteUser = (user: MobileUser) => {
     setUserToDelete(user);
     setDeleteDialogOpen(true);
+  };
+
+  const handleOpenDiagnostics = (user: MobileUser) => {
+    setUserForDiagnostics(user);
+    setDiagnosticsDialogOpen(true);
   };
 
   const confirmDeleteUser = async () => {
@@ -1057,6 +1066,15 @@ const MobileUsersPage: React.FC = () => {
                               <Analytics />
                             </IconButton>
                           </Tooltip>
+                          <Tooltip title="Run Device Registration Diagnostics">
+                            <IconButton
+                              size="small"
+                              color="info"
+                              onClick={() => handleOpenDiagnostics(user)}
+                            >
+                              <TroubleshootIcon />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Delete User and All Related Data">
                             <IconButton
                               size="small"
@@ -1310,6 +1328,19 @@ const MobileUsersPage: React.FC = () => {
           userId={selectedUser.id}
           userName={selectedUser.name}
           userEmail={selectedUser.email}
+        />
+      )}
+
+      {/* User Diagnostics Dialog */}
+      {userForDiagnostics && (
+        <UserDiagnosticsDialog
+          open={diagnosticsDialogOpen}
+          onClose={() => {
+            setDiagnosticsDialogOpen(false);
+            setUserForDiagnostics(null);
+          }}
+          userId={userForDiagnostics.id}
+          userName={userForDiagnostics.name}
         />
       )}
 
