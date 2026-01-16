@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // TEMPORARY RULES FOR DEBUGGING - REMOVE IN PRODUCTION
+    
+    // Allow all authenticated users to read exams (for testing)
+    match /exams/{examId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Allow all authenticated users to manage their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Exam access subcollection (for paid quiz access tracking)
+      match /exam_access/{examId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Allow all authenticated users to manage their own results
+    match /exam_results/{resultId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Allow all authenticated users to manage their own progress
+    match /user_progress/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow all authenticated users to read stats
+    match /exam_stats/{statId} {
+      allow read: if request.auth != null;
+    }
+    
+    // Admin collections (keep existing rules)
+    match /admin_users/{userId} {
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow read, update: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Test collection
+    match /test-connection/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

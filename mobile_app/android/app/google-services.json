@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "109048215498",
+    "project_id": "mcq-quiz-system",
+    "storage_bucket": "mcq-quiz-system.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:109048215498:android:c0ac280012cca252b08133",
+        "android_client_info": {
+          "package_name": "com.mcqquiz.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "109048215498-6hjo3vl5q8uuo52kepa0bpdej9ail37h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mcqquiz.app",
+            "certificate_hash": "08c3de0d17616f3ab8dde24512b1c1443df1faf5"
+          }
+        },
+        {
+          "client_id": "109048215498-bigcvs88b56mdml8f12uidgc8lago785.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2Y_N_F4--WNucvy4-Qvcidw8YIfodRm8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "109048215498-bigcvs88b56mdml8f12uidgc8lago785.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "109048215498-2otr50364jo4jd9rok1el4p4cmsci8lr.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.mcqquiz.mcqQuizApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // DEVELOPMENT RULES - More permissive for testing
+    // Replace with firestore.rules for production
+    
+    // Admin Users Collection (for web admin panel)
+    match /admin_users/{userId} {
+      // Allow authenticated users to create, read, and update their own admin document
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow any authenticated user to read admin users (for development)
+      allow read: if request.auth != null;
+    }
+    
+    // Test Collection (for Firebase connection testing)
+    match /test-connection/{docId} {
+      // Allow all authenticated users to read/write test documents
+      allow read, write: if request.auth != null;
+    }
+    
+    // Mobile App Users collection
+    match /users/{userId} {
+      // Allow users to read/write their own data
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Allow any authenticated user to read user data (for development)
+      allow read: if request.auth != null;
+
+      // Exam access subcollection (for paid quiz access tracking)
+      match /exam_access/{examId} {
+        // Allow users to read/write their own exam access
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+
+        // Allow any authenticated user to read exam access (for development)
+        allow read: if request.auth != null;
+      }
+    }
+    
+    // Questions collection
+    match /questions/{questionId} {
+      // Allow all authenticated users to read/write questions (for development)
+      allow read, write: if request.auth != null;
+    }
+    
+    // Categories collection
+    match /categories/{categoryId} {
+      // Allow all authenticated users to read/write categories (for development)
+      allow read, write: if request.auth != null;
+    }
+    
+    // Quiz sessions collection
+    match /quiz_sessions/{sessionId} {
+      // Allow users to read/write their own quiz sessions
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      
+      // Allow any authenticated user to read quiz sessions (for development)
+      allow read: if request.auth != null;
+    }
+    
+    // Quiz results collection
+    match /quiz_results/{resultId} {
+      // Allow users to read/write their own quiz results
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      
+      // Allow any authenticated user to read quiz results (for development)
+      allow read: if request.auth != null;
+    }
+    
+    // Analytics collection
+    match /analytics/{analyticsId} {
+      // Allow all authenticated users to read/write analytics (for development)
+      allow read, write: if request.auth != null;
+    }
+    
+    // Leaderboard collection
+    match /leaderboard/{leaderboardId} {
+      // Allow all authenticated users to read/write leaderboard (for development)
+      allow read, write: if request.auth != null;
+    }
+    
+    // Daily challenges collection
+    match /daily_challenges/{challengeId} {
+      // Allow all authenticated users to read/write challenges (for development)
+      allow read, write: if request.auth != null;
+    }
+    
+    // User bookmarks
+    match /user_bookmarks/{userId} {
+      // Allow users to read/write their own bookmarks
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // App settings
+    match /app_settings/{settingId} {
+      // Allow all authenticated users to read/write settings (for development)
+      allow read, write: if request.auth != null;
+    }
+  }
+}

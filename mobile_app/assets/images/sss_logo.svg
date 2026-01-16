@@ -1,0 +1,37 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Graduation Cap -->
+  <g transform="translate(100, 60)">
+    <!-- Cap Base -->
+    <polygon points="-60,-20 60,-20 50,-10 -50,-10" fill="#2C3E50" stroke="#1A252F" stroke-width="2"/>
+    <!-- Cap Top -->
+    <polygon points="-50,-30 50,-30 60,-20 -60,-20" fill="#34495E" stroke="#1A252F" stroke-width="2"/>
+    <!-- Tassel -->
+    <circle cx="45" cy="-25" r="3" fill="#E74C3C"/>
+    <line x1="45" y1="-22" x2="45" y2="-5" stroke="#E74C3C" stroke-width="2"/>
+    <circle cx="45" cy="-5" r="2" fill="#E74C3C"/>
+  </g>
+  
+  <!-- SSS Text -->
+  <g transform="translate(100, 140)">
+    <!-- First S -->
+    <g transform="translate(-45, 0)">
+      <path d="M -15 -25 Q -15 -35 -5 -35 L 5 -35 Q 15 -35 15 -25 Q 15 -15 5 -15 L -5 -15 Q -15 -15 -15 -5 Q -15 5 -5 5 L 5 5 Q 15 5 15 15" 
+            stroke="#2C3E50" stroke-width="6" fill="none" stroke-linecap="round"/>
+    </g>
+    
+    <!-- Second S -->
+    <g transform="translate(0, 0)">
+      <path d="M -15 -25 Q -15 -35 -5 -35 L 5 -35 Q 15 -35 15 -25 Q 15 -15 5 -15 L -5 -15 Q -15 -15 -15 -5 Q -15 5 -5 5 L 5 5 Q 15 5 15 15" 
+            stroke="#2C3E50" stroke-width="6" fill="none" stroke-linecap="round"/>
+    </g>
+    
+    <!-- Third S -->
+    <g transform="translate(45, 0)">
+      <path d="M -15 -25 Q -15 -35 -5 -35 L 5 -35 Q 15 -35 15 -25 Q 15 -15 5 -15 L -5 -15 Q -15 -15 -15 -5 Q -15 5 -5 5 L 5 5 Q 15 5 15 15" 
+            stroke="#2C3E50" stroke-width="6" fill="none" stroke-linecap="round"/>
+    </g>
+  </g>
+  
+  <!-- Shadow/Depth -->
+  <ellipse cx="100" cy="180" rx="80" ry="8" fill="#BDC3C7" opacity="0.3"/>
+</svg>

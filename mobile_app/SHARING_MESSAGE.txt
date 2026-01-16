@@ -1,0 +1,83 @@
+📱 DAKSHIN POSTAL ACADEMY - v1.7.32+40
+Complete Exam Preparation at Your Fingertips!
+
+🎯 WHAT IS THIS APP?
+Dakshin Postal Academy is your ultimate companion for Post Office departmental exam preparation. Practice with comprehensive MCQ tests, track your progress, and achieve your goals!
+
+⭐ KEY FEATURES:
+✅ Free & Paid Practice Quizzes
+✅ Real-time Performance Analytics  
+✅ Secure Payment Integration (Razorpay, PhonePe, UPI)
+✅ Exam Hub with News, Tips & Previous Papers
+✅ Smart Notifications for New Quizzes
+✅ 30-Day Access for Paid Quizzes
+✅ Screenshot Prevention for Security
+✅ Detailed Score Reports & Attempt History
+
+🆕 WHAT'S NEW IN v1.7.32+40?
+✅ Fixed Notification Navigation - Tap notifications to go directly to quizzes
+✅ Fixed Free Quiz Access - Admin-granted free access now works perfectly
+✅ Performance Improvements - Faster app startup and better memory management
+✅ 16KB Page Size Support - Works on all modern Android devices
+
+📥 HOW TO INSTALL?
+
+Option 1: Google Play Store (Recommended)
+1. Open Google Play Store
+2. Search for "Dakshin Postal Academy"
+3. Tap Install
+4. Open and enjoy!
+
+Option 2: Direct Installation
+1. Download the app file
+2. Enable "Unknown Sources" in Settings
+3. Open the downloaded file and install
+4. Launch the app
+
+📱 SYSTEM REQUIREMENTS:
+• Android 6.0 or higher
+• 2GB RAM minimum (4GB recommended)
+• 100MB free storage
+• Active internet connection
+
+🚀 GET STARTED IN 3 STEPS:
+1. Create Account - Sign up with your email
+2. Verify Email - Enter OTP from your email
+3. Start Learning - Browse and take quizzes!
+
+💳 PAYMENT OPTIONS:
+• Razorpay
+• PhonePe
+• UPI
+• All payments are secure and encrypted
+
+🔐 SECURITY & PRIVACY:
+• Screenshot & Screen Recording Prevention
+• Secure Email Authentication with OTP
+• Encrypted Data Storage
+• Privacy Compliant with Google Play Store
+
+📊 TRACK YOUR PROGRESS:
+• Detailed score reports
+• Attempt history with timestamps
+• Category-wise performance analysis
+• Real-time performance metrics
+
+💬 NEED HELP?
+• Use in-app feedback option
+• Contact support through the app
+• Share suggestions for improvements
+
+🎉 READY TO START YOUR EXAM PREPARATION?
+Download Dakshin Postal Academy now and begin your journey to success!
+
+Good luck with your studies! 📚✨
+
+---
+
+APP BUNDLE: DakshinPostalAcademy_v1.7.32+40_NotificationFix_16KB.aab
+SIZE: 67.8 MB
+VERSION: 1.7.32+40
+BUILD DATE: January 15, 2026
+STATUS: Ready for Google Play Store
+
