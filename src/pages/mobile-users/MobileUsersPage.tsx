@@ -41,11 +41,13 @@ import {
   FiberManualRecord,
   ArrowBack,
   CurrencyRupee,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, onSnapshot, orderBy, where, Unsubscribe } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import UserAnalyticsDialog from '../../components/admin/UserAnalyticsDialog';
+import * as XLSX from 'xlsx';
 
 interface QuizAttempt {
   id: string;
@@ -460,6 +462,74 @@ const MobileUsersPage: React.FC = () => {
     setAnalyticsDialogOpen(true);
   };
 
+  const handleExportToExcel = () => {
+    try {
+      // Prepare data for export
+      const exportData = filteredUsers.map(user => ({
+        'User ID': user.id,
+        'Name': user.name,
+        'Email': user.email,
+        'Phone': user.phone || 'N/A',
+        'Designation': user.designation,
+        'Office': user.officeName,
+        'Registered Date': user.registeredAt ? new Date(user.registeredAt).toLocaleDateString('en-IN') : 'N/A',
+        'Last Login': user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('en-IN') : 'Never',
+        'Status': user.isActive ? 'Active' : 'Inactive',
+        'Total Quizzes': user.totalQuizzes,
+        'Average Score': user.averageScore > 0 ? `${user.averageScore}%` : 'N/A',
+        'Current Streak': user.currentStreak,
+        'Activity Level': user.activityLevel,
+        'Email Verified': user.emailVerified ? 'Yes' : 'No',
+        'Profile Complete': user.profileComplete ? 'Yes' : 'No',
+        'Total Paid Amount': user.totalPaidAmount ? `₹${user.totalPaidAmount.toFixed(2)}` : '₹0',
+        'Paid Quizzes Count': user.paidQuizCount || 0,
+        'Sessions This Week': user.recentActivity?.sessionsThisWeek || 0,
+        'Last Quiz Date': user.recentActivity?.lastQuizDate ? new Date(user.recentActivity.lastQuizDate).toLocaleDateString('en-IN') : 'N/A',
+        'Last Quiz Score': user.recentActivity?.lastQuizScore ? `${user.recentActivity.lastQuizScore}%` : 'N/A',
+      }));
+
+      // Create workbook and worksheet
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Mobile Users');
+
+      // Set column widths
+      const columnWidths = [
+        { wch: 15 }, // User ID
+        { wch: 20 }, // Name
+        { wch: 25 }, // Email
+        { wch: 15 }, // Phone
+        { wch: 15 }, // Designation
+        { wch: 20 }, // Office
+        { wch: 15 }, // Registered Date
+        { wch: 20 }, // Last Login
+        { wch: 10 }, // Status
+        { wch: 12 }, // Total Quizzes
+        { wch: 15 }, // Average Score
+        { wch: 12 }, // Current Streak
+        { wch: 15 }, // Activity Level
+        { wch: 12 }, // Email Verified
+        { wch: 15 }, // Profile Complete
+        { wch: 15 }, // Total Paid Amount
+        { wch: 15 }, // Paid Quizzes Count
+        { wch: 15 }, // Sessions This Week
+        { wch: 15 }, // Last Quiz Date
+        { wch: 15 }, // Last Quiz Score
+      ];
+      worksheet['!cols'] = columnWidths;
+
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().split('T')[0];
+      const filename = `mobile_users_${timestamp}.xlsx`;
+
+      // Write file
+      XLSX.writeFile(workbook, filename);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      alert('Failed to export data to Excel. Please try again.');
+    }
+  };
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -702,17 +772,30 @@ const MobileUsersPage: React.FC = () => {
                 {searchTerm && ` matching "${searchTerm}"`}
                 {filterDesignation && ` with designation "${filterDesignation}"`}
               </Typography>
-              {(searchTerm || filterDesignation) && (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setFilterDesignation('');
-                  }}
-                >
-                  Clear Filters
-                </Button>
-              )}
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                {(searchTerm || filterDesignation) && (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setFilterDesignation('');
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                )}
+                <Tooltip title={`Export ${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''} to Excel`}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<DownloadIcon />}
+                    onClick={handleExportToExcel}
+                    disabled={filteredUsers.length === 0}
+                  >
+                    Export to Excel
+                  </Button>
+                </Tooltip>
+              </Box>
             </Box>
           </Box>
 
