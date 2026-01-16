@@ -161,13 +161,13 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'success':
-        return <CheckIcon sx={{ color: 'success.main' }} />;
+        return CheckIcon;
       case 'warning':
-        return <WarningIcon sx={{ color: 'warning.main' }} />;
+        return WarningIcon;
       case 'error':
-        return <ErrorIcon sx={{ color: 'error.main' }} />;
+        return ErrorIcon;
       default:
-        return null;
+        return undefined;
     }
   };
 
