@@ -165,6 +165,31 @@ const NotificationSenderPage: React.FC = () => {
       return;
     }
 
+    // Validate target selection
+    if (targetType === 'specific_users' && selectedUsers.length === 0) {
+      toast.error('Please select at least one user');
+      return;
+    }
+
+    if (targetType === 'designation' && !selectedDesignation.trim()) {
+      toast.error('Please select a designation');
+      return;
+    }
+
+    if (targetType === 'office' && !selectedOffice.trim()) {
+      toast.error('Please select an office');
+      return;
+    }
+
+    // Validate selected users have required fields
+    if (targetType === 'specific_users') {
+      const invalidUsers = selectedUsers.filter(u => !u.uid || !u.name);
+      if (invalidUsers.length > 0) {
+        toast.error('Some selected users have missing data. Please try again.');
+        return;
+      }
+    }
+
     try {
       setLoading(true);
 
@@ -465,7 +490,13 @@ const NotificationSenderPage: React.FC = () => {
                 options={mobileUsers}
                 getOptionLabel={(option) => `${option.name} (${option.designation})`}
                 value={selectedUsers}
-                onChange={(_, newValue) => setSelectedUsers(newValue)}
+                onChange={(_, newValue) => {
+                  // Deduplicate users by UID to prevent selecting same user twice
+                  const uniqueUsers = Array.from(
+                    new Map(newValue.map(user => [user.uid, user])).values()
+                  );
+                  setSelectedUsers(uniqueUsers);
+                }}
                 renderInput={(params) => (
                   <TextField {...params} label="Select Users" placeholder="Choose users" />
                 )}
@@ -473,7 +504,7 @@ const NotificationSenderPage: React.FC = () => {
                   value.map((option, index) => (
                     <Chip
                       variant="outlined"
-                      label={option.name}
+                      label={`${option.name} (${option.designation})`}
                       {...getTagProps({ index })}
                       key={option.uid}
                     />

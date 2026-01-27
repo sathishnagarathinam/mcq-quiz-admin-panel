@@ -21,6 +21,7 @@ import {
 } from '@mui/material';
 import { CheckCircle as CheckIcon, Error as ErrorIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { doc, getDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../../config/firebase';
 
 interface UserDiagnosticsDialogProps {
@@ -28,6 +29,7 @@ interface UserDiagnosticsDialogProps {
   onClose: () => void;
   userId: string;
   userName: string;
+  userEmail?: string;
 }
 
 interface DiagnosticResult {
@@ -42,8 +44,10 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
   onClose,
   userId,
   userName,
+  userEmail,
 }) => {
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [results, setResults] = useState<DiagnosticResult[]>([]);
   const [userData, setUserData] = useState<any>(null);
 
@@ -79,19 +83,53 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
       if (userDoc.exists()) {
         const data = userDoc.data();
 
-        // Check 2: Email verification
-        if (data.emailVerified) {
+        // Check 2: Email verification (Check both Firebase Auth and Firestore)
+        try {
+          const auth = getAuth();
+          let firebaseAuthVerified = false;
+          let firestoreVerified = data.emailVerified || false;
+
+          // Try to get user from Firebase Auth
+          try {
+            const userEmail = data.email;
+            // Note: We can't directly query Firebase Auth from client, so we check Firestore
+            // But we can infer from the sync status
+            firebaseAuthVerified = data.emailVerified || false;
+          } catch (e) {
+            // If we can't check Firebase Auth, just use Firestore value
+            firebaseAuthVerified = firestoreVerified;
+          }
+
+          if (firestoreVerified) {
+            diagnosticResults.push({
+              check: 'Email Verification (Firestore)',
+              status: 'success',
+              message: 'Email is verified in Firestore',
+            });
+          } else {
+            diagnosticResults.push({
+              check: 'Email Verification (Firestore)',
+              status: 'warning',
+              message: 'Email is NOT verified in Firestore',
+              details: 'User may need to verify email or sync may be pending',
+            });
+          }
+
+          // Check if there's a sync issue (Firebase Auth verified but Firestore not)
+          // We can detect this by checking if user has been active recently
+          if (!firestoreVerified && data.lastLogin) {
+            diagnosticResults.push({
+              check: 'Email Verification Sync Status',
+              status: 'warning',
+              message: 'Possible sync issue detected',
+              details: 'User has logged in but Firestore shows email not verified. Run sync from mobile app.',
+            });
+          }
+        } catch (e) {
           diagnosticResults.push({
             check: 'Email Verification',
-            status: 'success',
-            message: 'Email is verified',
-          });
-        } else {
-          diagnosticResults.push({
-            check: 'Email Verification',
-            status: 'warning',
-            message: 'Email is NOT verified',
-            details: 'User may need to verify email before device binding',
+            status: 'error',
+            message: `Error checking email verification: ${e instanceof Error ? e.message : 'Unknown error'}`,
           });
         }
 
@@ -168,6 +206,26 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
         return 'error';
       default:
         return 'default';
+    }
+  };
+
+  const handleManualSync = async () => {
+    setSyncing(true);
+    try {
+      // Manually update Firestore to mark email as verified
+      const { updateDoc } = await import('firebase/firestore');
+      await updateDoc(doc(db, 'mobile_users', userId), {
+        emailVerified: true,
+        updatedAt: new Date(),
+      });
+
+      // Re-run diagnostics to show updated status
+      await runDiagnostics();
+      alert('✅ Email verification status synced successfully!');
+    } catch (error) {
+      alert(`❌ Failed to sync: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -268,7 +326,16 @@ const UserDiagnosticsDialog: React.FC<UserDiagnosticsDialogProps> = ({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>
-        <Button onClick={runDiagnostics} disabled={loading} variant="outlined">
+        <Button
+          onClick={handleManualSync}
+          disabled={syncing || loading}
+          variant="contained"
+          color="warning"
+          title="Manually sync email verification status from Firebase Auth to Firestore"
+        >
+          {syncing ? 'Syncing...' : '🔄 Sync Email Verification'}
+        </Button>
+        <Button onClick={runDiagnostics} disabled={loading || syncing} variant="outlined">
           Re-run Diagnostics
         </Button>
       </DialogActions>

@@ -24,7 +24,6 @@ import {
   CheckCircle as CheckCircleIcon,
   Assignment as AssignmentIcon,
   Campaign as CampaignIcon,
-  LiveTv as LiveTvIcon,
   PhoneAndroid as MobileIcon,
   AdminPanelSettings as AdminIcon,
   Notifications as NotificationsIcon,
@@ -33,6 +32,7 @@ import {
   MenuBook as ExamHubIcon,
   Payment as PaymentIcon,
   CardGiftcard as GiftIcon,
+  Star as StarIcon,
 } from '@mui/icons-material';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -162,13 +162,6 @@ const DashboardPage: React.FC = () => {
       color: '#E91E63',
     },
     {
-      title: 'Live Test Management',
-      description: 'Schedule and manage live tests for students',
-      icon: <LiveTvIcon />,
-      path: '/live-test-management',
-      color: '#FF5722',
-    },
-    {
       title: 'Notification Management',
       description: 'Send notifications to mobile users by name, designation, or office',
       icon: <NotificationsIcon />,
@@ -195,6 +188,20 @@ const DashboardPage: React.FC = () => {
       icon: <GiftIcon />,
       path: '/free-quiz-access',
       color: '#FF6B6B',
+    },
+    {
+      title: 'Ratings Management',
+      description: 'View, edit, and manage quiz ratings and reviews',
+      icon: <StarIcon />,
+      path: '/ratings',
+      color: '#FFC107',
+    },
+    {
+      title: 'Live Test Registrations',
+      description: 'View registered users for live tests with details and payment info',
+      icon: <PeopleIcon />,
+      path: '/live-test-registrations',
+      color: '#9C27B0',
     },
   ];
 

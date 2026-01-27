@@ -145,19 +145,12 @@ export const addSampleBanners = async () => {
 };
 
 // Function to add sample live tests to Firebase
+// Note: Live tests are now stored as exams with isLiveTest=true
+// This function is deprecated and kept for backward compatibility
 export const addSampleLiveTests = async () => {
   try {
-    console.log('Adding sample live tests...');
-    
-    for (const test of sampleLiveTests) {
-      await addDoc(collection(db, 'live_tests'), {
-        ...test,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
-    
-    console.log('Sample live tests added successfully!');
+    console.log('Note: Live tests are now stored in the exams collection with isLiveTest=true');
+    console.log('Sample live tests can be created through the exam management interface');
     return true;
   } catch (error) {
     console.error('Error adding sample live tests:', error);

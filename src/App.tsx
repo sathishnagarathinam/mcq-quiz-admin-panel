@@ -24,6 +24,8 @@ import AnalyticsPage from './pages/analytics/AnalyticsPage';
 import MobileUsersPage from './pages/mobile-users/MobileUsersPage';
 import SettingsPage from './pages/settings/SettingsPage';
 import PaymentSettingsPage from './pages/settings/PaymentSettingsPage';
+import ForceUpdateSettingsPage from './pages/settings/ForceUpdateSettingsPage';
+import UserVersionManagementPage from './pages/settings/UserVersionManagementPage';
 import BulkUploadPage from './pages/bulk-upload/BulkUploadPage';
 import FirebaseTestPage from './pages/test/FirebaseTestPage';
 import ConfigTestPage from './pages/test/ConfigTestPage';
@@ -33,7 +35,6 @@ import UserQuizMappingTestPage from './pages/test/UserQuizMappingTestPage';
 import AnalyticsRefreshPage from './pages/test/AnalyticsRefreshPage';
 import UserManagementPage from './pages/user-management/UserManagementPage';
 import BannerManagement from './pages/banner-management/BannerManagement';
-import LiveTestManagement from './pages/live-test-management/LiveTestManagement';
 import IntegrationTestPage from './pages/test/IntegrationTestPage';
 import UploadDebugPage from './pages/test/UploadDebugPage';
 import UploadDiagnosticPage from './pages/test/UploadDiagnosticPage';
@@ -52,6 +53,8 @@ import FCMTokenManagerPage from './pages/test/FCMTokenManagerPage';
 import FeedbackManagementPage from './pages/feedback/FeedbackManagementPage';
 import PaymentManagementPage from './pages/payments/PaymentManagementPage';
 import FreeQuizAccessPage from './pages/free-quiz-access/FreeQuizAccessPage';
+import RatingsManagementPage from './pages/ratings/RatingsManagementPage';
+import LiveTestRegistrationsPage from './pages/live-test-registrations/LiveTestRegistrationsPage';
 
 // Theme configuration
 const theme = createTheme({
@@ -215,6 +218,8 @@ function App() {
                   <Route path="bulk-upload" element={<BulkUploadPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="settings/payments" element={<PaymentSettingsPage />} />
+                  <Route path="settings/force-update" element={<ForceUpdateSettingsPage />} />
+                  <Route path="settings/user-versions" element={<UserVersionManagementPage />} />
                   <Route path="test-firebase" element={<FirebaseTestPage />} />
                   <Route path="config-test" element={<ConfigTestPage />} />
                   <Route path="data-structure-test" element={<DataStructureTestPage />} />
@@ -223,7 +228,6 @@ function App() {
                   <Route path="analytics-refresh" element={<AnalyticsRefreshPage />} />
                   <Route path="user-management" element={<UserManagementPage />} />
                   <Route path="banner-management" element={<BannerManagement />} />
-                  <Route path="live-test-management" element={<LiveTestManagement />} />
                   <Route path="integration-test" element={<IntegrationTestPage />} />
                   <Route path="upload-debug" element={<UploadDebugPage />} />
                   <Route path="upload-diagnostic" element={<UploadDiagnosticPage />} />
@@ -241,6 +245,8 @@ function App() {
                   <Route path="exam-hub/results" element={<ResultsManagementPage />} />
                   <Route path="payments" element={<PaymentManagementPage />} />
                   <Route path="free-quiz-access" element={<FreeQuizAccessPage />} />
+                  <Route path="ratings" element={<RatingsManagementPage />} />
+                  <Route path="live-test-registrations" element={<LiveTestRegistrationsPage />} />
                 </Route>
 
                 {/* Catch all route */}

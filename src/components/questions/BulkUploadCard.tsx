@@ -26,6 +26,8 @@ import {
   DialogActions,
   FormControlLabel,
   Switch,
+  Checkbox,
+  Tooltip,
 } from '@mui/material';
 import {
   CloudUpload as CloudUploadIcon,
@@ -43,6 +45,7 @@ interface Question {
   correctAnswer: number;
   explanation?: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
+  isFree?: boolean; // Mark if this question is part of free questions in freemium model
 }
 
 interface LiveTestData {
@@ -69,6 +72,8 @@ interface BulkUploadData {
   price: number;
   currency: string;
   isFree: boolean;
+  freeQuestionsLimit?: number;
+  unlockPrice?: number;
 }
 
 interface ExamType {
@@ -84,6 +89,26 @@ interface BulkUploadCardProps {
   examTypes: ExamType[];
 }
 
+// Helper functions for datetime-local input handling
+const formatDateTimeLocal = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const parseDateTimeLocal = (value: string): Date => {
+  // datetime-local input returns a string in format "YYYY-MM-DDTHH:mm"
+  // This is interpreted as local time, so we need to create a Date object
+  // that represents that local time
+  const [datePart, timePart] = value.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hours, minutes] = timePart.split(':').map(Number);
+  return new Date(year, month - 1, day, hours, minutes);
+};
+
 const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examTypes }) => {
   const [file, setFile] = useState<File | null>(null);
   const [examConfig, setExamConfig] = useState({
@@ -94,12 +119,15 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
     price: 0,
     currency: 'INR',
     isFree: true,
+    freeQuestionsLimit: -1,
+    unlockPrice: 0,
   });
   const [parsedQuestions, setParsedQuestions] = useState<Question[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [openEditDialog, setOpenEditDialog] = useState(false);
+  const [freeQuestionsSelection, setFreeQuestionsSelection] = useState<Set<string>>(new Set()); // Track which questions are marked as free
 
   // Live test state
   const [createLiveTest, setCreateLiveTest] = useState(false);
@@ -212,9 +240,23 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
       return;
     }
 
+    // Validate freemium configuration
+    if (examConfig.freeQuestionsLimit && examConfig.freeQuestionsLimit > 0) {
+      if (freeQuestionsSelection.size !== examConfig.freeQuestionsLimit) {
+        setError(`Please select exactly ${examConfig.freeQuestionsLimit} questions as free`);
+        return;
+      }
+    }
+
+    // Mark questions with isFree flag based on selection
+    const questionsWithFreeFlag = parsedQuestions.map(q => ({
+      ...q,
+      isFree: freeQuestionsSelection.has(q.id),
+    }));
+
     const uploadData: BulkUploadData = {
       ...examConfig,
-      questions: parsedQuestions,
+      questions: questionsWithFreeFlag,
       createLiveTest,
       liveTestData: createLiveTest ? {
         ...liveTestForm,
@@ -224,7 +266,7 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
     };
 
     onUploadComplete(uploadData);
-    
+
     // Reset form
     setFile(null);
     setExamConfig({
@@ -235,10 +277,13 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
       price: 0,
       currency: 'INR',
       isFree: true,
+      freeQuestionsLimit: -1,
+      unlockPrice: 0,
     });
     setParsedQuestions([]);
     setShowPreview(false);
     setError(null);
+    setFreeQuestionsSelection(new Set());
 
     // Reset live test form
     setCreateLiveTest(false);
@@ -516,6 +561,56 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
                 </Box>
               </Grid>
 
+              {/* Freemium Configuration */}
+              <Grid item xs={12}>
+                <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#fff3e0' }}>
+                  <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 2 }}>
+                    🎯 Freemium Model Configuration
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Allow users to attempt a limited number of questions for free before requiring payment to unlock remaining questions.
+                  </Typography>
+
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        type="number"
+                        label="Free Questions Limit"
+                        value={examConfig.freeQuestionsLimit}
+                        onChange={(e) => setExamConfig({ ...examConfig, freeQuestionsLimit: parseInt(e.target.value) })}
+                        inputProps={{ min: -1 }}
+                        size="small"
+                        helperText="0 = Fully Paid | -1 = Fully Free | >0 = Freemium (e.g., 5)"
+                      />
+                    </Grid>
+
+                    {examConfig.freeQuestionsLimit > 0 && (
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="Unlock Price"
+                          value={examConfig.unlockPrice}
+                          onChange={(e) => setExamConfig({ ...examConfig, unlockPrice: parseFloat(e.target.value) || 0 })}
+                          inputProps={{ min: 0, step: 0.01 }}
+                          size="small"
+                          helperText="Price to unlock remaining questions"
+                        />
+                      </Grid>
+                    )}
+                  </Grid>
+
+                  {examConfig.freeQuestionsLimit > 0 && (
+                    <Box sx={{ mt: 2, p: 1.5, backgroundColor: '#e3f2fd', borderRadius: 1 }}>
+                      <Typography variant="caption" color="primary">
+                        ℹ️ Users can attempt {examConfig.freeQuestionsLimit} questions for free, then pay ₹{examConfig.unlockPrice || 0} to unlock the remaining questions.
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Grid>
+
               {/* Live Test Option */}
               <Grid item xs={12}>
                 <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f8f9fa' }}>
@@ -579,8 +674,8 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
                             fullWidth
                             type="datetime-local"
                             label="Start Time"
-                            value={liveTestForm.startTime.toISOString().slice(0, 16)}
-                            onChange={(e) => setLiveTestForm({ ...liveTestForm, startTime: new Date(e.target.value) })}
+                            value={formatDateTimeLocal(liveTestForm.startTime)}
+                            onChange={(e) => setLiveTestForm({ ...liveTestForm, startTime: parseDateTimeLocal(e.target.value) })}
                             size="small"
                             InputLabelProps={{ shrink: true }}
                           />
@@ -590,8 +685,8 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
                             fullWidth
                             type="datetime-local"
                             label="End Time"
-                            value={liveTestForm.endTime.toISOString().slice(0, 16)}
-                            onChange={(e) => setLiveTestForm({ ...liveTestForm, endTime: new Date(e.target.value) })}
+                            value={formatDateTimeLocal(liveTestForm.endTime)}
+                            onChange={(e) => setLiveTestForm({ ...liveTestForm, endTime: parseDateTimeLocal(e.target.value) })}
                             size="small"
                             InputLabelProps={{ shrink: true }}
                           />
@@ -674,20 +769,61 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
         {/* Questions Preview */}
         {showPreview && parsedQuestions.length > 0 && (
           <Box mt={2}>
-            <Typography variant="h6" gutterBottom>
-              Questions Preview ({parsedQuestions.length} questions)
-            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">
+                Questions Preview ({parsedQuestions.length} questions)
+              </Typography>
+              {examConfig.freeQuestionsLimit && examConfig.freeQuestionsLimit > 0 && (
+                <Tooltip
+                  title={
+                    freeQuestionsSelection.size !== examConfig.freeQuestionsLimit
+                      ? `Select exactly ${examConfig.freeQuestionsLimit} questions as free`
+                      : 'Perfect! All free questions selected'
+                  }
+                >
+                  <Chip
+                    label={`${freeQuestionsSelection.size}/${examConfig.freeQuestionsLimit} free questions`}
+                    color={freeQuestionsSelection.size === examConfig.freeQuestionsLimit ? 'success' : 'warning'}
+                    variant="outlined"
+                  />
+                </Tooltip>
+              )}
+            </Box>
             <Box sx={{ maxHeight: 400, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 1 }}>
               {parsedQuestions.map((question, index) => (
                 <Accordion key={question.id} sx={{ boxShadow: 'none', '&:before': { display: 'none' } }}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                     <Box display="flex" justifyContent="space-between" alignItems="center" width="100%">
+                      {examConfig.freeQuestionsLimit && examConfig.freeQuestionsLimit > 0 && (
+                        <Checkbox
+                          checked={freeQuestionsSelection.has(question.id)}
+                          onChange={(e) => {
+                            const newSelection = new Set(freeQuestionsSelection);
+                            if (e.target.checked) {
+                              newSelection.add(question.id);
+                            } else {
+                              newSelection.delete(question.id);
+                            }
+                            setFreeQuestionsSelection(newSelection);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{ mr: 1 }}
+                        />
+                      )}
                       <Box flex={1}>
                         <Typography variant="subtitle2">
                           Q{index + 1}: {question.question.substring(0, 60)}
                           {question.question.length > 60 && '...'}
                         </Typography>
                         <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                          {freeQuestionsSelection.has(question.id) && (
+                            <Chip
+                              label="FREE"
+                              size="small"
+                              color="success"
+                              variant="outlined"
+                            />
+                          )}
                           <Chip
                             label={question.difficulty}
                             size="small"
@@ -761,19 +897,40 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
         >
           {showPreview ? 'Hide Preview' : 'Preview Questions'}
         </Button>
-        
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={handleCreateExam}
-          disabled={!file || parsedQuestions.length === 0 || !examConfig.examName || !examConfig.examType || examConfig.suitableFor.length === 0}
-          sx={{
-            background: 'linear-gradient(45deg, #6366F1 30%, #8B5CF6 90%)',
-            boxShadow: '0 3px 5px 2px rgba(99, 102, 241, .3)',
-          }}
+
+        <Tooltip
+          title={
+            examConfig.freeQuestionsLimit && examConfig.freeQuestionsLimit > 0
+              ? freeQuestionsSelection.size !== examConfig.freeQuestionsLimit
+                ? `Please select exactly ${examConfig.freeQuestionsLimit} questions as free`
+                : ''
+              : ''
+          }
         >
-          Create Exam ({parsedQuestions.length} questions)
-        </Button>
+          <span>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={handleCreateExam}
+              disabled={
+                !file ||
+                parsedQuestions.length === 0 ||
+                !examConfig.examName ||
+                !examConfig.examType ||
+                examConfig.suitableFor.length === 0 ||
+                (examConfig.freeQuestionsLimit && examConfig.freeQuestionsLimit > 0
+                  ? freeQuestionsSelection.size !== examConfig.freeQuestionsLimit
+                  : false)
+              }
+              sx={{
+                background: 'linear-gradient(45deg, #6366F1 30%, #8B5CF6 90%)',
+                boxShadow: '0 3px 5px 2px rgba(99, 102, 241, .3)',
+              }}
+            >
+              Create Exam ({parsedQuestions.length} questions)
+            </Button>
+          </span>
+        </Tooltip>
       </CardActions>
 
       {/* Edit Question Dialog */}
@@ -856,6 +1013,28 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, explanation: e.target.value })}
                   />
                 </Grid>
+
+                {examConfig.freeQuestionsLimit && examConfig.freeQuestionsLimit > 0 && (
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={freeQuestionsSelection.has(editingQuestion.id)}
+                          onChange={(e) => {
+                            const newSelection = new Set(freeQuestionsSelection);
+                            if (e.target.checked) {
+                              newSelection.add(editingQuestion.id);
+                            } else {
+                              newSelection.delete(editingQuestion.id);
+                            }
+                            setFreeQuestionsSelection(newSelection);
+                          }}
+                        />
+                      }
+                      label="Mark as free question"
+                    />
+                  </Grid>
+                )}
               </Grid>
             </Box>
           )}

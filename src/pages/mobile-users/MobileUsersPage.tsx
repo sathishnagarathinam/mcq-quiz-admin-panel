@@ -48,9 +48,10 @@ import {
   Download as DownloadIcon,
   Delete as DeleteIcon,
   Troubleshoot as TroubleshootIcon,
+  VerifiedUser as VerifiedUserIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, onSnapshot, orderBy, where, Unsubscribe, deleteDoc, doc, getDocs } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, where, Unsubscribe, deleteDoc, doc, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import UserAnalyticsDialog from '../../components/admin/UserAnalyticsDialog';
 import UserDiagnosticsDialog from '../../components/admin/UserDiagnosticsDialog';
@@ -150,6 +151,10 @@ const MobileUsersPage: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [diagnosticsDialogOpen, setDiagnosticsDialogOpen] = useState(false);
   const [userForDiagnostics, setUserForDiagnostics] = useState<MobileUser | null>(null);
+  const [updatingEmailVerification, setUpdatingEmailVerification] = useState<string | null>(null);
+  const [resetDeviceDialogOpen, setResetDeviceDialogOpen] = useState(false);
+  const [userForDeviceReset, setUserForDeviceReset] = useState<MobileUser | null>(null);
+  const [isResettingDevice, setIsResettingDevice] = useState(false);
 
   // Store quiz attempts for real-time user stats calculation
   const quizAttemptsRef = useRef<Map<string, QuizAttempt[]>>(new Map());
@@ -553,6 +558,67 @@ const MobileUsersPage: React.FC = () => {
     setDiagnosticsDialogOpen(true);
   };
 
+  const handleResetDeviceBinding = (user: MobileUser) => {
+    setUserForDeviceReset(user);
+    setResetDeviceDialogOpen(true);
+  };
+
+  const confirmResetDeviceBinding = async () => {
+    if (!userForDeviceReset) return;
+
+    setIsResettingDevice(true);
+    try {
+      const userId = userForDeviceReset.id;
+      console.log(`🔄 Resetting device binding for user: ${userId}`);
+
+      // Update Firestore to clear device binding
+      await updateDoc(doc(db, 'mobile_users', userId), {
+        registeredDeviceId: null,
+        isDeviceBound: false,
+        deviceInfo: null,
+        deviceRegisteredAt: null,
+        updatedAt: new Date(),
+      });
+
+      console.log(`✅ Device binding reset for user: ${userId}`);
+
+      setResetDeviceDialogOpen(false);
+      setUserForDeviceReset(null);
+
+      toast.success(`✅ Device binding cleared for ${userForDeviceReset.name}. They can now login from a different device.`);
+    } catch (error) {
+      console.error('Error resetting device binding:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`Failed to reset device binding: ${errorMessage}`);
+    } finally {
+      setIsResettingDevice(false);
+    }
+  };
+
+  const handleToggleEmailVerification = async (user: MobileUser) => {
+    setUpdatingEmailVerification(user.id);
+    try {
+      const newVerificationStatus = !user.emailVerified;
+
+      await updateDoc(doc(db, 'mobile_users', user.id), {
+        emailVerified: newVerificationStatus,
+        updatedAt: new Date(),
+      });
+
+      toast.success(
+        newVerificationStatus
+          ? `✅ Email verified for ${user.name}`
+          : `❌ Email verification removed for ${user.name}`
+      );
+      console.log(`📧 Email verification updated for ${user.id}: ${newVerificationStatus}`);
+    } catch (error) {
+      console.error('Error updating email verification:', error);
+      toast.error(`Failed to update email verification: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setUpdatingEmailVerification(null);
+    }
+  };
+
   const confirmDeleteUser = async () => {
     if (!userToDelete) return;
 
@@ -561,78 +627,69 @@ const MobileUsersPage: React.FC = () => {
       const userId = userToDelete.id;
       console.log(`🗑️ Starting deletion process for user: ${userId}`);
 
-      // Delete user document from users collection
-      await deleteDoc(doc(db, 'users', userId));
-      console.log(`✓ Deleted user document: ${userId}`);
-
-      // Delete all quiz attempts for this user
-      const quizAttemptsRef = collection(db, 'quizAttempts');
-      const quizAttemptsQuery = query(quizAttemptsRef, where('userId', '==', userId));
-      const quizAttemptsSnapshot = await getDocs(quizAttemptsQuery);
-
-      for (const docSnapshot of quizAttemptsSnapshot.docs) {
-        await deleteDoc(doc(db, 'quizAttempts', docSnapshot.id));
+      // Validate that REACT_APP_FUNCTIONS_URL is set
+      if (!process.env.REACT_APP_FUNCTIONS_URL) {
+        throw new Error('Cloud Functions URL is not configured. Please check your environment variables.');
       }
-      console.log(`✓ Deleted ${quizAttemptsSnapshot.docs.length} quiz attempts`);
 
-      // Delete all paid orders for this user
-      const paidOrdersRef = collection(db, 'paidOrders');
-      const paidOrdersQuery = query(paidOrdersRef, where('userId', '==', userId));
-      const paidOrdersSnapshot = await getDocs(paidOrdersQuery);
+      const deleteUrl = `${process.env.REACT_APP_FUNCTIONS_URL}/users/${userId}`;
+      console.log(`📡 Calling delete endpoint: ${deleteUrl}`);
 
-      for (const docSnapshot of paidOrdersSnapshot.docs) {
-        await deleteDoc(doc(db, 'paidOrders', docSnapshot.id));
+      // Call Cloud Function to delete user from Firebase Authentication and Firestore
+      const response = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log(`📊 Response status: ${response.status}, Content-Type: ${response.headers.get('content-type')}`);
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      const isJson = contentType && contentType.includes('application/json');
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to delete user';
+
+        if (isJson) {
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } catch (parseError) {
+            console.error('Failed to parse error response:', parseError);
+            errorMessage = `Server error (${response.status}): ${response.statusText}`;
+          }
+        } else {
+          // Response is HTML or plain text (likely an error page)
+          const text = await response.text();
+          console.error('Non-JSON error response:', text.substring(0, 200));
+          errorMessage = `Server error (${response.status}): ${response.statusText}. Check console for details.`;
+        }
+
+        throw new Error(errorMessage);
       }
-      console.log(`✓ Deleted ${paidOrdersSnapshot.docs.length} paid orders`);
 
-      // Delete all device registrations for this user
-      const deviceRegistrationsRef = collection(db, 'deviceRegistrations');
-      const deviceRegistrationsQuery = query(deviceRegistrationsRef, where('userId', '==', userId));
-      const deviceRegistrationsSnapshot = await getDocs(deviceRegistrationsQuery);
-
-      for (const docSnapshot of deviceRegistrationsSnapshot.docs) {
-        await deleteDoc(doc(db, 'deviceRegistrations', docSnapshot.id));
+      // Parse successful response
+      let result;
+      if (isJson) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        console.warn('Response is not JSON:', text.substring(0, 200));
+        result = { success: true, message: 'User deleted successfully' };
       }
-      console.log(`✓ Deleted ${deviceRegistrationsSnapshot.docs.length} device registrations`);
 
-      // Delete all notifications for this user
-      const notificationsRef = collection(db, 'notifications');
-      const notificationsQuery = query(notificationsRef, where('userId', '==', userId));
-      const notificationsSnapshot = await getDocs(notificationsQuery);
-
-      for (const docSnapshot of notificationsSnapshot.docs) {
-        await deleteDoc(doc(db, 'notifications', docSnapshot.id));
-      }
-      console.log(`✓ Deleted ${notificationsSnapshot.docs.length} notifications`);
-
-      // Delete all feedback for this user
-      const feedbackRef = collection(db, 'feedback');
-      const feedbackQuery = query(feedbackRef, where('userId', '==', userId));
-      const feedbackSnapshot = await getDocs(feedbackQuery);
-
-      for (const docSnapshot of feedbackSnapshot.docs) {
-        await deleteDoc(doc(db, 'feedback', docSnapshot.id));
-      }
-      console.log(`✓ Deleted ${feedbackSnapshot.docs.length} feedback entries`);
-
-      // Delete all user sessions
-      const sessionsRef = collection(db, 'userSessions');
-      const sessionsQuery = query(sessionsRef, where('userId', '==', userId));
-      const sessionsSnapshot = await getDocs(sessionsQuery);
-
-      for (const docSnapshot of sessionsSnapshot.docs) {
-        await deleteDoc(doc(db, 'userSessions', docSnapshot.id));
-      }
-      console.log(`✓ Deleted ${sessionsSnapshot.docs.length} user sessions`);
+      console.log(`✅ User deletion completed for: ${userId}`, result);
 
       setDeleteDialogOpen(false);
       setUserToDelete(null);
 
       toast.success(`User "${userToDelete.name}" and all related data deleted successfully!`);
-      console.log(`✅ User deletion completed for: ${userId}`);
     } catch (error) {
       console.error('Error deleting user:', error);
-      toast.error(`Failed to delete user: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`Failed to delete user: ${errorMessage}`);
     } finally {
       setIsDeleting(false);
     }
@@ -940,6 +997,7 @@ const MobileUsersPage: React.FC = () => {
                     <TableCell>Avg Score</TableCell>
                     <TableCell>Streak</TableCell>
                     <TableCell>Paid Amount</TableCell>
+                    <TableCell>Email Verified</TableCell>
                     <TableCell>Last Login</TableCell>
                     <TableCell>Actions</TableCell>
                   </TableRow>
@@ -1034,6 +1092,31 @@ const MobileUsersPage: React.FC = () => {
                         </Tooltip>
                       </TableCell>
                       <TableCell>
+                        <Tooltip title={user.emailVerified ? 'Click to remove verification' : 'Click to verify email'}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleToggleEmailVerification(user)}
+                            disabled={updatingEmailVerification === user.id}
+                            color={user.emailVerified ? 'success' : 'default'}
+                            sx={{
+                              transition: 'all 0.3s ease',
+                              '&:hover': {
+                                backgroundColor: user.emailVerified ? 'success.light' : 'action.hover',
+                              }
+                            }}
+                          >
+                            {updatingEmailVerification === user.id ? (
+                              <CircularProgress size={20} />
+                            ) : (
+                              <VerifiedUserIcon />
+                            )}
+                          </IconButton>
+                        </Tooltip>
+                        <Typography variant="caption" color={user.emailVerified ? 'success.main' : 'text.secondary'}>
+                          {user.emailVerified ? 'Verified' : 'Not Verified'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
                         <Tooltip title={user.lastLoginAt
                           ? new Date(user.lastLoginAt).toLocaleString('en-IN', {
                               timeZone: 'Asia/Kolkata',
@@ -1073,6 +1156,15 @@ const MobileUsersPage: React.FC = () => {
                               onClick={() => handleOpenDiagnostics(user)}
                             >
                               <TroubleshootIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Reset Device Binding - Allow login from different device">
+                            <IconButton
+                              size="small"
+                              color="warning"
+                              onClick={() => handleResetDeviceBinding(user)}
+                            >
+                              <PhoneAndroid />
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Delete User and All Related Data">
@@ -1393,6 +1485,9 @@ const MobileUsersPage: React.FC = () => {
           </Typography>
           <Box component="ul" sx={{ pl: 2, mb: 2 }}>
             <Typography component="li" variant="body2" color="text.secondary">
+              Firebase Authentication account
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
               User account and profile information
             </Typography>
             <Typography component="li" variant="body2" color="text.secondary">
@@ -1439,6 +1534,100 @@ const MobileUsersPage: React.FC = () => {
               </>
             ) : (
               'Delete User'
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Reset Device Binding Confirmation Dialog */}
+      <Dialog
+        open={resetDeviceDialogOpen}
+        onClose={() => {
+          if (!isResettingDevice) {
+            setResetDeviceDialogOpen(false);
+            setUserForDeviceReset(null);
+          }
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ color: 'warning.main', fontWeight: 'bold' }}>
+          🔄 Reset Device Binding
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            ⚠️ This will clear the device binding for this user
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Are you sure you want to reset the device binding for:
+          </Typography>
+          {userForDeviceReset && (
+            <Box sx={{
+              p: 2,
+              bgcolor: 'background.default',
+              borderRadius: 1,
+              mb: 2,
+              border: '1px solid',
+              borderColor: 'divider'
+            }}>
+              <Typography variant="subtitle2" fontWeight="bold">
+                {userForDeviceReset.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {userForDeviceReset.email}
+              </Typography>
+              {userForDeviceReset.phone && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {userForDeviceReset.phone}
+                </Typography>
+              )}
+            </Box>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <strong>What will happen:</strong>
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Device binding will be cleared from the user's account
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              User can login from a different device
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              The new device will be registered as the primary device
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              No user data will be deleted
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="success.main" fontWeight="bold">
+            ✅ This action is reversible - user data remains intact
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={() => {
+              setResetDeviceDialogOpen(false);
+              setUserForDeviceReset(null);
+            }}
+            disabled={isResettingDevice}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmResetDeviceBinding}
+            variant="contained"
+            color="warning"
+            disabled={isResettingDevice}
+            sx={{ minWidth: 120 }}
+          >
+            {isResettingDevice ? (
+              <>
+                <CircularProgress size={20} sx={{ mr: 1 }} />
+                Resetting...
+              </>
+            ) : (
+              'Reset Device Binding'
             )}
           </Button>
         </DialogActions>

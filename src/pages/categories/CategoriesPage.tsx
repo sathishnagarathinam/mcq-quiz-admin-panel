@@ -33,6 +33,7 @@ import {
   InputAdornment,
   FormControlLabel,
   Switch,
+  Checkbox,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -70,6 +71,7 @@ interface Question {
   correctAnswer: number;
   explanation?: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
+  isFree?: boolean; // Mark if this question is part of free questions in freemium model
 }
 
 interface ExamType {
@@ -97,6 +99,22 @@ interface Exam {
   price?: number;
   currency?: string;
   isFree?: boolean;
+  freeQuestionsLimit?: number; // Number of free questions (0 = fully paid, -1 = fully free, >0 = freemium)
+  unlockPrice?: number; // Price to unlock remaining questions in freemium model
+  // Live test scheduling fields
+  isLiveTest?: boolean;
+  liveTestDescription?: string;
+  liveTestStartTime?: Date;
+  liveTestEndTime?: Date;
+  liveTestBackgroundColor?: string;
+  liveTestCardBackgroundColor?: string;
+  liveTestIsPaid?: boolean;
+  liveTestPrice?: number;
+  // Live test notification fields
+  liveTestNotificationEnabled?: boolean;
+  liveTestNotificationTiming?: 'immediate' | '1hour' | '24hours'; // When to send notification before start time
+  // Live test result release fields
+  liveTestResultReleaseTime?: Date;
 }
 
 const examSuitabilityOptions = ['MTS', 'Postman', 'PA', 'IP', 'Group B'];
@@ -118,6 +136,43 @@ const defaultExamTypes: ExamType[] = [
     createdAt: new Date(),
   },
 ];
+
+// Helper function to safely convert date to ISO string for datetime-local input
+// datetime-local expects local time, not UTC
+const safeToISOString = (date: any): string => {
+  try {
+    if (!date) return '';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) {
+      console.warn('Invalid date:', date);
+      // Return current local time in datetime-local format
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+    // Convert to local time format for datetime-local input
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  } catch (error) {
+    console.error('Error converting date to ISO string:', error, date);
+    // Return current local time in datetime-local format
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
+};
 
 const CategoriesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -152,6 +207,7 @@ const CategoriesPage: React.FC = () => {
   const [openQuestionDialog, setOpenQuestionDialog] = useState(false);
   const [currentExam, setCurrentExam] = useState<Exam | null>(null);
   const [questionFilter, setQuestionFilter] = useState<string>(''); // Filter for questions by difficulty
+  const [freeQuestionsSelection, setFreeQuestionsSelection] = useState<Set<string>>(new Set()); // Track which questions are marked as free
 
   // Exam type management states
   const [openExamTypeDialog, setOpenExamTypeDialog] = useState(false);
@@ -176,6 +232,22 @@ const CategoriesPage: React.FC = () => {
     price: 0,
     currency: 'INR',
     isFree: true,
+    freeQuestionsLimit: -1,
+    unlockPrice: 0,
+    // Live test scheduling fields
+    isLiveTest: false,
+    liveTestDescription: '',
+    liveTestStartTime: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    liveTestEndTime: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000),
+    liveTestBackgroundColor: '#FF6B6B',
+    liveTestCardBackgroundColor: '#FFFFFF',
+    liveTestIsPaid: false,
+    liveTestPrice: 0,
+    // Live test notification fields
+    liveTestNotificationEnabled: false,
+    liveTestNotificationTiming: '24hours' as 'immediate' | '1hour' | '24hours',
+    // Live test result release fields
+    liveTestResultReleaseTime: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000),
   });
 
   // Live test form state
@@ -208,7 +280,7 @@ const CategoriesPage: React.FC = () => {
 
   // Filtered exams based on search and filters
   const filteredExams = useMemo(() => {
-    return exams.filter((exam) => {
+    const filtered = exams.filter((exam) => {
       // Search filter
       const matchesSearch = searchQuery === '' ||
         exam.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -231,6 +303,13 @@ const CategoriesPage: React.FC = () => {
 
       return matchesSearch && matchesExamType && matchesSuitability && matchesStatus;
     });
+
+    // Sort by creation date (latest first)
+    return filtered.sort((a, b) => {
+      const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+      const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+      return dateB.getTime() - dateA.getTime();
+    });
   }, [exams, searchQuery, filterExamType, filterSuitability, filterStatus]);
 
   // Clear all filters
@@ -249,7 +328,21 @@ const CategoriesPage: React.FC = () => {
 
       // Fetch all exams first
       querySnapshot.forEach((doc) => {
-        examsList.push({ id: doc.id, ...doc.data() } as Exam);
+        const data = doc.data();
+
+        // Convert Firestore Timestamps to JavaScript Date objects
+        const exam: Exam = {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate?.() || new Date(data.createdAt),
+          updatedAt: data.updatedAt?.toDate?.() || new Date(data.updatedAt),
+          // Convert live test date fields
+          liveTestStartTime: data.liveTestStartTime?.toDate?.() || (data.liveTestStartTime ? new Date(data.liveTestStartTime) : undefined),
+          liveTestEndTime: data.liveTestEndTime?.toDate?.() || (data.liveTestEndTime ? new Date(data.liveTestEndTime) : undefined),
+          liveTestResultReleaseTime: data.liveTestResultReleaseTime?.toDate?.() || (data.liveTestResultReleaseTime ? new Date(data.liveTestResultReleaseTime) : undefined),
+        } as Exam;
+
+        examsList.push(exam);
       });
 
       // Calculate totalAttempts for each exam from quiz_attempts collection
@@ -388,6 +481,8 @@ const CategoriesPage: React.FC = () => {
       price: 0,
       currency: 'INR',
       isFree: true,
+      freeQuestionsLimit: -1,
+      unlockPrice: 0,
     });
 
     // Reset live test form
@@ -410,7 +505,30 @@ const CategoriesPage: React.FC = () => {
 
   const handleEditExam = (exam: Exam) => {
     setEditingExam(exam);
-    setExamForm(exam);
+
+    // Debug logging
+    console.log('🔵 handleEditExam - exam.isLiveTest:', exam.isLiveTest);
+    console.log('🔵 handleEditExam - exam.liveTestStartTime:', exam.liveTestStartTime, typeof exam.liveTestStartTime);
+    console.log('🔵 handleEditExam - exam.liveTestEndTime:', exam.liveTestEndTime, typeof exam.liveTestEndTime);
+    console.log('🔵 handleEditExam - exam.liveTestResultReleaseTime:', exam.liveTestResultReleaseTime, typeof exam.liveTestResultReleaseTime);
+
+    setExamForm({
+      ...exam,
+      // Ensure live test fields are initialized
+      isLiveTest: exam.isLiveTest || false,
+      liveTestDescription: exam.liveTestDescription || '',
+      liveTestStartTime: exam.liveTestStartTime || new Date(Date.now() + 24 * 60 * 60 * 1000),
+      liveTestEndTime: exam.liveTestEndTime || new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000),
+      liveTestBackgroundColor: exam.liveTestBackgroundColor || '#FF6B6B',
+      liveTestCardBackgroundColor: exam.liveTestCardBackgroundColor || '#FFFFFF',
+      liveTestIsPaid: exam.liveTestIsPaid || false,
+      liveTestPrice: exam.liveTestPrice || 0,
+      // Live test notification fields
+      liveTestNotificationEnabled: exam.liveTestNotificationEnabled || false,
+      liveTestNotificationTiming: exam.liveTestNotificationTiming || '24hours',
+      // Live test result release fields
+      liveTestResultReleaseTime: exam.liveTestResultReleaseTime || new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000),
+    });
     setOpenDialog(true);
   };
 
@@ -421,58 +539,45 @@ const CategoriesPage: React.FC = () => {
         return;
       }
 
-      const examData = {
+      // Debug logging
+      console.log('🔴 handleSaveExam - examForm.isLiveTest:', examForm.isLiveTest);
+      console.log('🔴 handleSaveExam - examForm.liveTestStartTime:', examForm.liveTestStartTime);
+      console.log('🔴 handleSaveExam - examForm.liveTestEndTime:', examForm.liveTestEndTime);
+      console.log('🔴 handleSaveExam - createLiveTest:', createLiveTest);
+      console.log('🔴 handleSaveExam - editingExam:', editingExam?.id);
+
+      // For new exams, sync createLiveTest state to examForm.isLiveTest
+      const isLiveTestEnabled = editingExam ? examForm.isLiveTest : createLiveTest;
+
+      // If live test is marked as paid, sync the price to exam's price field
+      const finalExamData = {
         ...examForm,
+        isLiveTest: isLiveTestEnabled,
         updatedAt: Timestamp.now(),
         createdAt: editingExam ? editingExam.createdAt : Timestamp.now(),
       };
 
+      console.log('🔴 finalExamData.isLiveTest:', finalExamData.isLiveTest);
+      console.log('🔴 finalExamData keys:', Object.keys(finalExamData));
+
+      // If live test is paid, update exam's price and isFree fields
+      if (isLiveTestEnabled && examForm.liveTestIsPaid && examForm.liveTestPrice) {
+        finalExamData.price = examForm.liveTestPrice;
+        finalExamData.isFree = false;
+      }
+
       let examRef;
       if (editingExam) {
-        await updateDoc(doc(db, 'exams', editingExam.id!), examData);
+        await updateDoc(doc(db, 'exams', editingExam.id!), finalExamData);
         examRef = { id: editingExam.id };
         toast.success('Exam updated successfully');
       } else {
-        examRef = await addDoc(collection(db, 'exams'), examData);
+        examRef = await addDoc(collection(db, 'exams'), finalExamData);
         toast.success('Exam created successfully');
       }
 
-      // Create live test if option is selected
-      if (createLiveTest && !editingExam) {
-        try {
-          const liveTestData = {
-            title: liveTestForm.title || examForm.name,
-            description: liveTestForm.description || `Live test for ${examForm.name}`,
-            examId: examRef.id,
-            examType: examForm.examType,
-            suitableFor: examForm.suitableFor,
-            startTime: Timestamp.fromDate(liveTestForm.startTime),
-            endTime: Timestamp.fromDate(liveTestForm.endTime),
-            durationMinutes: liveTestForm.durationMinutes,
-            totalQuestions: examForm.numberOfQuestions || 0,
-            isActive: true,
-            isLive: false,
-            status: 'upcoming',
-            maxParticipants: liveTestForm.maxParticipants,
-            currentParticipants: 0,
-            instructorName: liveTestForm.instructorName || 'System Admin',
-            instructorImage: '',
-            tags: [],
-            difficulty: liveTestForm.difficulty,
-            passingScore: liveTestForm.passingScore,
-            showResults: liveTestForm.showResults,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-            createdBy: 'admin', // TODO: Get actual admin user
-          };
-
-          await addDoc(collection(db, 'live_tests'), liveTestData);
-          toast.success('Live test scheduled successfully!');
-        } catch (error) {
-          console.error('Error creating live test:', error);
-          toast.error('Exam created but failed to schedule live test');
-        }
-      }
+      // Live test data is now stored directly in the exam document
+      // No need to create/update separate live_tests collection
 
       setOpenDialog(false);
       fetchExams();
@@ -497,6 +602,14 @@ const CategoriesPage: React.FC = () => {
 
   const handleManageQuestions = (exam: Exam) => {
     setCurrentExam(exam);
+    // Initialize free questions selection from existing questions
+    const freeQuestionIds = new Set<string>();
+    exam.questions?.forEach(q => {
+      if (q.isFree) {
+        freeQuestionIds.add(q.id);
+      }
+    });
+    setFreeQuestionsSelection(freeQuestionIds);
     setOpenQuestionDialog(true);
   };
 
@@ -533,15 +646,21 @@ const CategoriesPage: React.FC = () => {
   const handleSaveQuestions = async () => {
     if (currentExam && currentExam.id) {
       try {
+        // Update questions with isFree flag based on selection
+        const updatedQuestions = currentExam.questions.map(q => ({
+          ...q,
+          isFree: freeQuestionsSelection.has(q.id),
+        }));
+
         // Save questions to exam
         await updateDoc(doc(db, 'exams', currentExam.id), {
-          questions: currentExam.questions,
-          numberOfQuestions: currentExam.questions.length,
+          questions: updatedQuestions,
+          numberOfQuestions: updatedQuestions.length,
           updatedAt: Timestamp.now(),
         });
 
         // Also save each question individually to questions collection
-        for (const question of currentExam.questions) {
+        for (const question of updatedQuestions) {
           const questionData = {
             ...question,
             examId: currentExam.id,
@@ -1008,7 +1127,7 @@ const CategoriesPage: React.FC = () => {
                   </Box>
 
                   {/* Trending and Attempts Info */}
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                     <Box display="flex" alignItems="center" gap={1}>
                       {exam.isTrending && (
                         <Chip
@@ -1040,6 +1159,28 @@ const CategoriesPage: React.FC = () => {
                         </Tooltip>
                       )}
                     </Box>
+                  </Box>
+
+                  {/* Pricing and Freemium Info */}
+                  <Box sx={{ p: 1, backgroundColor: '#f5f5f5', borderRadius: 1, mb: 1 }}>
+                    {exam.isFree ? (
+                      <Typography variant="caption" color="success.main" sx={{ fontWeight: 'bold' }}>
+                        ✓ Free Quiz
+                      </Typography>
+                    ) : (exam.freeQuestionsLimit ?? -1) > 0 ? (
+                      <Box>
+                        <Typography variant="caption" sx={{ fontWeight: 'bold', color: '#ff9800' }}>
+                          🎯 Freemium: {exam.freeQuestionsLimit} free questions
+                        </Typography>
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          Unlock price: ₹{exam.unlockPrice || 0}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Typography variant="caption" color="error.main" sx={{ fontWeight: 'bold' }}>
+                        💰 Paid: ₹{exam.price || 0}
+                      </Typography>
+                    )}
                   </Box>
                 </CardContent>
 
@@ -1362,39 +1503,100 @@ const CategoriesPage: React.FC = () => {
                 </Box>
               </Grid>
 
-              {/* Live Test Option - Only show for new exams */}
-              {!editingExam && (
-                <Grid item xs={12}>
-                  <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f8f9fa' }}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={createLiveTest}
-                          onChange={(e) => setCreateLiveTest(e.target.checked)}
-                          color="primary"
-                        />
-                      }
-                      label={
-                        <Box>
-                          <Typography variant="subtitle2" fontWeight="bold">
-                            📅 Schedule as Live Test
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Create a scheduled live test that all users can participate in at a specific time
-                          </Typography>
-                        </Box>
-                      }
-                    />
+              {/* Freemium Configuration */}
+              <Grid item xs={12}>
+                <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#fff3e0' }}>
+                  <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 2 }}>
+                    🎯 Freemium Model Configuration
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Allow users to attempt a limited number of questions for free before requiring payment to unlock remaining questions.
+                  </Typography>
 
-                    {createLiveTest && (
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        type="number"
+                        label="Free Questions Limit"
+                        value={examForm.freeQuestionsLimit ?? -1}
+                        onChange={(e) => setExamForm({ ...examForm, freeQuestionsLimit: parseInt(e.target.value) })}
+                        inputProps={{ min: -1 }}
+                        size="small"
+                        helperText="0 = Fully Paid | -1 = Fully Free | >0 = Freemium (e.g., 5)"
+                      />
+                    </Grid>
+
+                    {(examForm.freeQuestionsLimit ?? -1) > 0 && (
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="Unlock Price"
+                          value={examForm.unlockPrice ?? 0}
+                          onChange={(e) => setExamForm({ ...examForm, unlockPrice: parseFloat(e.target.value) || 0 })}
+                          inputProps={{ min: 0, step: 0.01 }}
+                          size="small"
+                          helperText="Price to unlock remaining questions"
+                        />
+                      </Grid>
+                    )}
+                  </Grid>
+
+                  {(examForm.freeQuestionsLimit ?? -1) > 0 && (
+                    <Box sx={{ mt: 2, p: 1.5, backgroundColor: '#e3f2fd', borderRadius: 1 }}>
+                      <Typography variant="caption" color="primary">
+                        ℹ️ Users can attempt {examForm.freeQuestionsLimit} questions for free, then pay ₹{examForm.unlockPrice || 0} to unlock the remaining {Math.max(0, (examForm.numberOfQuestions || 0) - (examForm.freeQuestionsLimit || 0))} questions.
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Grid>
+
+              {/* Live Test Option - Show for both new and existing exams */}
+              <Grid item xs={12}>
+                <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f8f9fa' }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={editingExam ? (examForm.isLiveTest || false) : createLiveTest}
+                        onChange={(e) => {
+                          if (editingExam) {
+                            setExamForm({ ...examForm, isLiveTest: e.target.checked });
+                          } else {
+                            setCreateLiveTest(e.target.checked);
+                          }
+                        }}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                          📅 Schedule as Live Test
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Create a scheduled live test that all users can participate in at a specific time
+                        </Typography>
+                      </Box>
+                    }
+                  />
+
+                    {((editingExam && examForm.isLiveTest) || (!editingExam && createLiveTest)) && (
                       <Box sx={{ mt: 2 }}>
                         <Grid container spacing={2}>
                           <Grid item xs={12} sm={6}>
                             <TextField
                               fullWidth
                               label="Live Test Title"
-                              value={liveTestForm.title}
-                              onChange={(e) => setLiveTestForm({ ...liveTestForm, title: e.target.value })}
+                              value={editingExam ? (examForm.name || '') : liveTestForm.title}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, name: e.target.value });
+                                } else {
+                                  setLiveTestForm({ ...liveTestForm, title: e.target.value });
+                                }
+                              }}
                               placeholder={examForm.name || 'Enter title'}
                               size="small"
                             />
@@ -1403,8 +1605,12 @@ const CategoriesPage: React.FC = () => {
                             <TextField
                               fullWidth
                               label="Instructor Name"
-                              value={liveTestForm.instructorName}
-                              onChange={(e) => setLiveTestForm({ ...liveTestForm, instructorName: e.target.value })}
+                              value={editingExam ? '' : liveTestForm.instructorName}
+                              onChange={(e) => {
+                                if (!editingExam) {
+                                  setLiveTestForm({ ...liveTestForm, instructorName: e.target.value });
+                                }
+                              }}
                               placeholder="System Admin"
                               size="small"
                             />
@@ -1415,8 +1621,14 @@ const CategoriesPage: React.FC = () => {
                               multiline
                               rows={2}
                               label="Description"
-                              value={liveTestForm.description}
-                              onChange={(e) => setLiveTestForm({ ...liveTestForm, description: e.target.value })}
+                              value={editingExam ? (examForm.liveTestDescription || '') : liveTestForm.description}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, liveTestDescription: e.target.value });
+                                } else {
+                                  setLiveTestForm({ ...liveTestForm, description: e.target.value });
+                                }
+                              }}
                               placeholder={`Live test for ${examForm.name || 'this exam'}`}
                               size="small"
                             />
@@ -1426,8 +1638,16 @@ const CategoriesPage: React.FC = () => {
                               fullWidth
                               type="datetime-local"
                               label="Start Time"
-                              value={liveTestForm.startTime.toISOString().slice(0, 16)}
-                              onChange={(e) => setLiveTestForm({ ...liveTestForm, startTime: new Date(e.target.value) })}
+                              value={editingExam
+                                ? safeToISOString(examForm.liveTestStartTime)
+                                : safeToISOString(liveTestForm.startTime)}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, liveTestStartTime: new Date(e.target.value) });
+                                } else {
+                                  setLiveTestForm({ ...liveTestForm, startTime: new Date(e.target.value) });
+                                }
+                              }}
                               size="small"
                               InputLabelProps={{ shrink: true }}
                             />
@@ -1437,8 +1657,16 @@ const CategoriesPage: React.FC = () => {
                               fullWidth
                               type="datetime-local"
                               label="End Time"
-                              value={liveTestForm.endTime.toISOString().slice(0, 16)}
-                              onChange={(e) => setLiveTestForm({ ...liveTestForm, endTime: new Date(e.target.value) })}
+                              value={editingExam
+                                ? safeToISOString(examForm.liveTestEndTime)
+                                : safeToISOString(liveTestForm.endTime)}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, liveTestEndTime: new Date(e.target.value) });
+                                } else {
+                                  setLiveTestForm({ ...liveTestForm, endTime: new Date(e.target.value) });
+                                }
+                              }}
                               size="small"
                               InputLabelProps={{ shrink: true }}
                             />
@@ -1473,12 +1701,146 @@ const CategoriesPage: React.FC = () => {
                               size="small"
                             />
                           </Grid>
+
+                          {/* Banner Background Color */}
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Banner Background Color"
+                              type="color"
+                              value={editingExam ? (examForm.liveTestBackgroundColor || '#FF6B6B') : '#FF6B6B'}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, liveTestBackgroundColor: e.target.value });
+                                }
+                              }}
+                              InputLabelProps={{ shrink: true }}
+                              size="small"
+                            />
+                          </Grid>
+
+                          {/* Card Background Color */}
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Card Background Color"
+                              type="color"
+                              value={editingExam ? (examForm.liveTestCardBackgroundColor || '#FFFFFF') : '#FFFFFF'}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, liveTestCardBackgroundColor: e.target.value });
+                                }
+                              }}
+                              InputLabelProps={{ shrink: true }}
+                              size="small"
+                            />
+                          </Grid>
+
+                          {/* Paid Test Configuration */}
+                          <Grid item xs={12} sm={6}>
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={editingExam ? (examForm.liveTestIsPaid || false) : false}
+                                  onChange={(e) => {
+                                    if (editingExam) {
+                                      setExamForm({ ...examForm, liveTestIsPaid: e.target.checked });
+                                    }
+                                  }}
+                                  color="primary"
+                                />
+                              }
+                              label="Paid Test"
+                            />
+                          </Grid>
+
+                          {/* Price Field - Show only when test is paid */}
+                          {(editingExam && examForm.liveTestIsPaid) && (
+                            <Grid item xs={12} sm={6}>
+                              <TextField
+                                fullWidth
+                                type="number"
+                                label="Price (₹)"
+                                value={examForm.liveTestPrice || 0}
+                                onChange={(e) => setExamForm({ ...examForm, liveTestPrice: parseFloat(e.target.value) || 0 })}
+                                inputProps={{ step: '0.01', min: '0' }}
+                                size="small"
+                              />
+                            </Grid>
+                          )}
+
+                          {/* Notification Configuration */}
+                          <Grid item xs={12}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                              📢 Notification Settings
+                            </Typography>
+                          </Grid>
+
+                          <Grid item xs={12} sm={6}>
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={editingExam ? (examForm.liveTestNotificationEnabled || false) : false}
+                                  onChange={(e) => {
+                                    if (editingExam) {
+                                      setExamForm({ ...examForm, liveTestNotificationEnabled: e.target.checked });
+                                    }
+                                  }}
+                                  color="primary"
+                                />
+                              }
+                              label="Send Notification"
+                            />
+                          </Grid>
+
+                          {/* Notification Timing - Show only when notifications are enabled */}
+                          {(editingExam && examForm.liveTestNotificationEnabled) && (
+                            <Grid item xs={12} sm={6}>
+                              <FormControl fullWidth size="small">
+                                <InputLabel>Notification Timing</InputLabel>
+                                <Select
+                                  value={examForm.liveTestNotificationTiming || '24hours'}
+                                  onChange={(e) => setExamForm({ ...examForm, liveTestNotificationTiming: e.target.value as 'immediate' | '1hour' | '24hours' })}
+                                  label="Notification Timing"
+                                >
+                                  <MenuItem value="immediate">Immediately upon scheduling</MenuItem>
+                                  <MenuItem value="1hour">1 hour before start time</MenuItem>
+                                  <MenuItem value="24hours">24 hours before start time</MenuItem>
+                                </Select>
+                              </FormControl>
+                            </Grid>
+                          )}
+
+                          {/* Result Release Configuration */}
+                          <Grid item xs={12}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, mt: 2 }}>
+                              📊 Result Release Settings
+                            </Typography>
+                          </Grid>
+
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              type="datetime-local"
+                              label="Result Release Time"
+                              value={editingExam
+                                ? safeToISOString(examForm.liveTestResultReleaseTime)
+                                : safeToISOString(new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000))}
+                              onChange={(e) => {
+                                if (editingExam) {
+                                  setExamForm({ ...examForm, liveTestResultReleaseTime: new Date(e.target.value) });
+                                }
+                              }}
+                              size="small"
+                              InputLabelProps={{ shrink: true }}
+                              helperText="Results will be hidden until this time. Users who attended can view results after this time."
+                            />
+                          </Grid>
                         </Grid>
                       </Box>
                     )}
                   </Box>
                 </Grid>
-              )}
 
               <Grid item xs={12}>
                 <Alert severity="info">
@@ -1603,9 +1965,29 @@ const CategoriesPage: React.FC = () => {
               <Grid item xs={12} md={6}>
                 <Paper sx={{ p: 3 }}>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Typography variant="h6">
-                      Questions ({currentExam?.questions?.length || 0})
-                    </Typography>
+                    <Box>
+                      <Typography variant="h6">
+                        Questions ({currentExam?.questions?.length || 0})
+                      </Typography>
+                      {examForm.freeQuestionsLimit && examForm.freeQuestionsLimit > 0 && (
+                        <Box>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              display: 'block',
+                              mt: 0.5,
+                              color: freeQuestionsSelection.size === examForm.freeQuestionsLimit ? 'success.main' : 'warning.main',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            {freeQuestionsSelection.size === examForm.freeQuestionsLimit
+                              ? `✓ ${freeQuestionsSelection.size}/${examForm.freeQuestionsLimit} free questions selected`
+                              : `⚠️ Select ${examForm.freeQuestionsLimit} questions as free (${freeQuestionsSelection.size} selected)`
+                            }
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
                     <FormControl size="small" sx={{ minWidth: 120 }}>
                       <InputLabel>Filter</InputLabel>
                       <Select
@@ -1635,21 +2017,45 @@ const CategoriesPage: React.FC = () => {
                         ?.map((question, index) => (
                         <React.Fragment key={question.id}>
                           <ListItem alignItems="flex-start">
+                            {examForm.freeQuestionsLimit && examForm.freeQuestionsLimit > 0 && (
+                              <Checkbox
+                                checked={freeQuestionsSelection.has(question.id)}
+                                onChange={(e) => {
+                                  const newSelection = new Set(freeQuestionsSelection);
+                                  if (e.target.checked) {
+                                    newSelection.add(question.id);
+                                  } else {
+                                    newSelection.delete(question.id);
+                                  }
+                                  setFreeQuestionsSelection(newSelection);
+                                }}
+                                sx={{ mr: 1 }}
+                              />
+                            )}
                             <ListItemText
                               primary={
                                 <Box display="flex" justifyContent="space-between" alignItems="center">
                                   <Typography variant="subtitle2">
                                     Q{index + 1}: {question.question}
                                   </Typography>
-                                  <Chip
-                                    label={question.difficulty || 'Medium'}
-                                    size="small"
-                                    color={
-                                      (question.difficulty || 'Medium') === 'Easy' ? 'success' :
-                                      (question.difficulty || 'Medium') === 'Medium' ? 'warning' : 'error'
-                                    }
-                                    sx={{ ml: 1 }}
-                                  />
+                                  <Box display="flex" gap={1} alignItems="center">
+                                    {freeQuestionsSelection.has(question.id) && (
+                                      <Chip
+                                        label="FREE"
+                                        size="small"
+                                        color="success"
+                                        variant="outlined"
+                                      />
+                                    )}
+                                    <Chip
+                                      label={question.difficulty || 'Medium'}
+                                      size="small"
+                                      color={
+                                        (question.difficulty || 'Medium') === 'Easy' ? 'success' :
+                                        (question.difficulty || 'Medium') === 'Medium' ? 'warning' : 'error'
+                                      }
+                                    />
+                                  </Box>
                                 </Box>
                               }
                               secondary={
@@ -1703,14 +2109,31 @@ const CategoriesPage: React.FC = () => {
           <Button onClick={() => setOpenQuestionDialog(false)} startIcon={<CancelIcon />}>
             Cancel
           </Button>
-          <Button
-            onClick={handleSaveQuestions}
-            variant="contained"
-            startIcon={<SaveIcon />}
-            disabled={!currentExam?.questions?.length}
+          <Tooltip
+            title={
+              examForm.freeQuestionsLimit && examForm.freeQuestionsLimit > 0
+                ? freeQuestionsSelection.size !== examForm.freeQuestionsLimit
+                  ? `Please select exactly ${examForm.freeQuestionsLimit} questions as free`
+                  : ''
+                : ''
+            }
           >
-            Save Questions
-          </Button>
+            <span>
+              <Button
+                onClick={handleSaveQuestions}
+                variant="contained"
+                startIcon={<SaveIcon />}
+                disabled={
+                  !currentExam?.questions?.length ||
+                  (examForm.freeQuestionsLimit && examForm.freeQuestionsLimit > 0
+                    ? freeQuestionsSelection.size !== examForm.freeQuestionsLimit
+                    : false)
+                }
+              >
+                Save Questions
+              </Button>
+            </span>
+          </Tooltip>
         </DialogActions>
       </Dialog>
 

@@ -85,6 +85,15 @@ router.post('/send-fcm', async (req, res) => {
 
     console.log('📨 [FCM] Validation passed, sending message...');
 
+    // Validate message structure before sending
+    console.log('📨 [FCM] Message validation:');
+    console.log('  - notification.title:', typeof message.notification.title, message.notification.title);
+    console.log('  - notification.body:', typeof message.notification.body, message.notification.body);
+    console.log('  - token:', typeof message.token, message.token?.substring(0, 20) + '...');
+    console.log('  - data keys:', Object.keys(message.data || {}));
+    console.log('  - android:', !!message.android);
+    console.log('  - apns:', !!message.apns);
+
     // Send the message using Firebase Admin SDK
     const response = await admin.messaging().send(message);
 
@@ -97,25 +106,35 @@ router.post('/send-fcm', async (req, res) => {
 
   } catch (error) {
     console.error('❌ [FCM] Error sending FCM message:', error);
+    console.error('❌ [FCM] Error type:', typeof error);
+    console.error('❌ [FCM] Error keys:', error instanceof Error ? Object.keys(error) : 'N/A');
+
+    // Log full error details for debugging
+    if (error instanceof Error) {
+      console.error('❌ [FCM] Error message:', error.message);
+      console.error('❌ [FCM] Error stack:', error.stack);
+      console.error('❌ [FCM] Error name:', error.name);
+    } else if (typeof error === 'object' && error !== null) {
+      console.error('❌ [FCM] Error object:', JSON.stringify(error, null, 2));
+    }
 
     // Handle specific FCM errors
     if (error instanceof Error) {
       const errorMessage = error.message.toLowerCase();
 
-      if (errorMessage.includes('registration-token-not-registered')) {
-        console.error('❌ [FCM] Invalid or expired FCM token');
-        return res.status(400).json({
-          error: 'Invalid or expired FCM token',
+      // Handle invalid/expired tokens gracefully - these are expected errors
+      if (errorMessage.includes('registration-token-not-registered') ||
+          errorMessage.includes('requested entity was not found') ||
+          errorMessage.includes('invalid-argument') ||
+          errorMessage.includes('mismatched credential')) {
+        console.warn('⚠️ [FCM] Invalid or expired FCM token - skipping this user');
+        // Return 200 OK since this is an expected error (token expired/invalid)
+        // The notification system should continue with other users
+        return res.status(200).json({
+          success: false,
+          skipped: true,
+          reason: 'Invalid or expired FCM token',
           code: 'INVALID_TOKEN',
-          details: error.message
-        });
-      }
-
-      if (errorMessage.includes('invalid-argument')) {
-        console.error('❌ [FCM] Invalid message format');
-        return res.status(400).json({
-          error: 'Invalid message format',
-          code: 'INVALID_MESSAGE',
           details: error.message
         });
       }

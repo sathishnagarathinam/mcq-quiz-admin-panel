@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions } from '@mui/material';
-import { ArrowBack, Payment, Security, Notifications, Storage } from '@mui/icons-material';
+import { ArrowBack, Payment, Security, Notifications, Storage, SystemUpdate, PhoneAndroid } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 
 const SettingsPage: React.FC = () => {
@@ -15,11 +15,25 @@ const SettingsPage: React.FC = () => {
       color: 'primary',
     },
     {
+      title: 'Force App Update',
+      description: 'Control when users must update the mobile app to continue using it',
+      icon: <SystemUpdate />,
+      path: '/settings/force-update',
+      color: 'error',
+    },
+    {
+      title: 'User App Versions',
+      description: 'View user app versions and send selective update notifications',
+      icon: <PhoneAndroid />,
+      path: '/settings/user-versions',
+      color: 'info',
+    },
+    {
       title: 'Security Settings',
       description: 'Manage authentication, permissions, and security policies',
       icon: <Security />,
       path: '/settings/security',
-      color: 'error',
+      color: 'secondary',
     },
     {
       title: 'Notification Settings',

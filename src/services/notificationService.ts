@@ -744,33 +744,29 @@ export class NotificationService {
         ok: response.ok
       });
 
-      if (!response.ok) {
-        let errorText = '';
-        try {
-          errorText = await response.text();
-        } catch (e) {
-          errorText = 'Could not read error response';
-        }
+      const result = await response.json();
 
+      if (!response.ok) {
         console.error(`❌ [DEBUG] Cloud Functions error:`, {
           status: response.status,
           statusText: response.statusText,
-          errorText: errorText,
+          result: result,
           url: fullUrl
         });
 
-        // Try to parse JSON error response
-        try {
-          const errorJson = JSON.parse(errorText);
-          console.error('📋 [DEBUG] Parsed error response:', errorJson);
-        } catch (e) {
-          // Not JSON, that's ok
-        }
-
-        throw new Error(`Cloud Functions error: ${response.status} - ${errorText}`);
+        throw new Error(`Cloud Functions error: ${response.status} - ${result?.error || 'Unknown error'}`);
       }
 
-      const result = await response.json();
+      // Check if the token was skipped (invalid/expired)
+      if (result.skipped) {
+        console.warn(`⚠️ [DEBUG] FCM token skipped for this user:`, {
+          reason: result.reason,
+          code: result.code,
+          details: result.details
+        });
+        return; // Don't throw, just skip this user
+      }
+
       console.log('✅ [DEBUG] FCM message sent successfully via Cloud Functions:', result);
 
     } catch (error) {

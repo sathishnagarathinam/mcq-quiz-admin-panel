@@ -9,7 +9,7 @@ import {
   Button,
 } from '@mui/material';
 import { ArrowBack } from '@mui/icons-material';
-import { collection, addDoc, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, Timestamp, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import toast from 'react-hot-toast';
 import BulkUploadCard from '../../components/questions/BulkUploadCard';
@@ -48,6 +48,8 @@ interface BulkUploadData {
   price: number;
   currency: string;
   isFree: boolean;
+  freeQuestionsLimit?: number;
+  unlockPrice?: number;
 }
 
 interface ExamType {
@@ -134,6 +136,8 @@ const BulkUploadPage: React.FC = () => {
         price: data.isFree ? 0 : data.price,
         currency: data.currency,
         isFree: data.isFree,
+        freeQuestionsLimit: data.freeQuestionsLimit ?? -1,
+        unlockPrice: data.unlockPrice ?? 0,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
         isActive: true,
@@ -161,41 +165,22 @@ const BulkUploadPage: React.FC = () => {
       // Create live test if option is selected
       if (data.createLiveTest && data.liveTestData) {
         try {
-          const liveTestData = {
-            title: data.liveTestData.title,
-            description: data.liveTestData.description,
-            examId: examRef.id,
-            examName: data.examName,
-            examType: data.examType,
-            suitableFor: data.suitableFor,
-            startTime: Timestamp.fromDate(data.liveTestData.startTime),
-            endTime: Timestamp.fromDate(data.liveTestData.endTime),
-            durationMinutes: data.liveTestData.durationMinutes,
-            totalQuestions: data.questions.length,
-            isActive: true,
-            isLive: false,
-            status: 'upcoming',
-            maxParticipants: data.liveTestData.maxParticipants,
-            currentParticipants: 0,
-            instructorName: data.liveTestData.instructorName || 'System Admin',
-            instructorImage: '',
-            tags: [],
-            difficulty: data.liveTestData.difficulty,
-            passingScore: data.liveTestData.passingScore,
-            showResults: data.liveTestData.showResults,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-            createdBy: 'admin', // TODO: Get actual admin user
-          };
-
-          await addDoc(collection(db, 'live_tests'), liveTestData);
+          // Update exam document with live test fields
+          await updateDoc(doc(db, 'exams', examRef.id), {
+            isLiveTest: true,
+            liveTestStartTime: Timestamp.fromDate(data.liveTestData.startTime),
+            liveTestEndTime: Timestamp.fromDate(data.liveTestData.endTime),
+            liveTestIsPaid: false,
+            liveTestPrice: 0,
+            liveTestBackgroundColor: '#FF6B6B',
+          });
 
           toast.success(
             `🎉 Successfully created exam "${data.examName}" with ${data.questions.length} questions and scheduled live test! ` +
             `The exam is now available in the Categories section and mobile app.`
           );
         } catch (error) {
-          console.error('Error creating live test:', error);
+          console.error('Error scheduling live test:', error);
           toast.success(
             `🎉 Successfully created exam "${data.examName}" with ${data.questions.length} questions! ` +
             `The exam is now available in the Categories section and mobile app. However, failed to schedule live test.`
