@@ -28,6 +28,14 @@ import {
   Switch,
   Checkbox,
   Tooltip,
+  Collapse,
+  Paper,
+  Divider,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  AlertTitle,
 } from '@mui/material';
 import {
   CloudUpload as CloudUploadIcon,
@@ -36,7 +44,16 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   ExpandMore as ExpandMoreIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
 } from '@mui/icons-material';
+import {
+  validateQuestionCSV,
+  CSVValidationResult,
+  CSVValidationError,
+  ParsedQuestion,
+} from '../../utils/csvValidation';
 
 interface Question {
   id: string;
@@ -129,6 +146,10 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
   const [openEditDialog, setOpenEditDialog] = useState(false);
   const [freeQuestionsSelection, setFreeQuestionsSelection] = useState<Set<string>>(new Set()); // Track which questions are marked as free
 
+  // CSV validation state
+  const [validationResult, setValidationResult] = useState<CSVValidationResult<ParsedQuestion> | null>(null);
+  const [showValidationDetails, setShowValidationDetails] = useState(true);
+
   // Live test state
   const [createLiveTest, setCreateLiveTest] = useState(false);
   const [liveTestForm, setLiveTestForm] = useState<LiveTestData>({
@@ -157,68 +178,41 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
     setError(null);
-    
+    setValidationResult(null);
+    setParsedQuestions([]);
+    setShowPreview(false);
+
     if (selectedFile) {
       try {
         const text = await selectedFile.text();
-        const questions = await parseCSV(text);
-        setParsedQuestions(questions);
-        setShowPreview(true);
+
+        // Use the new comprehensive validation
+        const result = validateQuestionCSV(text);
+        setValidationResult(result);
+
+        if (result.isValid || result.data.length > 0) {
+          // Convert ParsedQuestion to Question format (add isFree field)
+          const questions: Question[] = result.data.map(q => ({
+            ...q,
+            isFree: false,
+          }));
+          setParsedQuestions(questions);
+          setShowPreview(true);
+        }
+
+        // Show summary error if there are critical issues
+        if (!result.isValid && result.data.length === 0) {
+          setError(`CSV validation failed. See details below.`);
+        } else if (result.errors.length > 0) {
+          setError(`CSV parsed with ${result.errors.length} error(s). ${result.validRows} of ${result.totalRows} rows are valid.`);
+        }
+
       } catch (err) {
-        setError('Failed to parse CSV file. Please check the format.');
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        setError(`Failed to parse CSV file: ${errorMessage}`);
         console.error('CSV parsing error:', err);
       }
     }
-  };
-
-  const parseCSV = async (text: string): Promise<Question[]> => {
-    const lines = text.split('\n').filter(line => line.trim());
-    
-    if (lines.length < 2) {
-      throw new Error('File must contain at least a header row and one question');
-    }
-
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const questionIndex = headers.indexOf('question');
-    const option1Index = headers.findIndex(h => h.includes('option1') || h.includes('option_1'));
-    const option2Index = headers.findIndex(h => h.includes('option2') || h.includes('option_2'));
-    const option3Index = headers.findIndex(h => h.includes('option3') || h.includes('option_3'));
-    const option4Index = headers.findIndex(h => h.includes('option4') || h.includes('option_4'));
-    const correctIndex = headers.findIndex(h => h.includes('correct'));
-    const difficultyIndex = headers.findIndex(h => h.includes('difficulty'));
-    const explanationIndex = headers.findIndex(h => h.includes('explanation'));
-
-    if (questionIndex === -1 || option1Index === -1 || correctIndex === -1) {
-      throw new Error('CSV must contain at least: question, option1, option2, option3, option4, correct columns');
-    }
-
-    const questions: Question[] = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
-      
-      if (values.length < headers.length) continue;
-      
-      const question: Question = {
-        id: `bulk_${Date.now()}_${i}`,
-        question: values[questionIndex],
-        options: [
-          values[option1Index] || '',
-          values[option2Index] || '',
-          values[option3Index] || '',
-          values[option4Index] || ''
-        ].filter(opt => opt.trim()),
-        correctAnswer: Math.max(0, parseInt(values[correctIndex]) - 1) || 0,
-        difficulty: (values[difficultyIndex] || 'Medium') as 'Easy' | 'Medium' | 'Hard',
-        explanation: values[explanationIndex] || undefined,
-      };
-
-      if (question.question && question.options.length >= 2) {
-        questions.push(question);
-      }
-    }
-
-    return questions;
   };
 
   const handleSuitableForChange = (event: SelectChangeEvent<string[]>) => {
@@ -283,6 +277,7 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
     setParsedQuestions([]);
     setShowPreview(false);
     setError(null);
+    setValidationResult(null);
     setFreeQuestionsSelection(new Set());
 
     // Reset live test form
@@ -357,9 +352,207 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
           </Alert>
         )}
 
-        {error && (
+        {/* Simple error message */}
+        {error && !validationResult && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
+          </Alert>
+        )}
+
+        {/* Detailed CSV Validation Results */}
+        {validationResult && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && (
+          <Paper
+            elevation={0}
+            sx={{
+              mb: 2,
+              border: '1px solid',
+              borderColor: validationResult.errors.length > 0 ? 'error.main' : 'warning.main',
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header with summary */}
+            <Box
+              sx={{
+                p: 2,
+                backgroundColor: validationResult.errors.length > 0 ? 'error.light' : 'warning.light',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+              onClick={() => setShowValidationDetails(!showValidationDetails)}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {validationResult.errors.length > 0 ? (
+                  <ErrorIcon color="error" />
+                ) : (
+                  <WarningIcon color="warning" />
+                )}
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    CSV Validation {validationResult.isValid ? 'Warnings' : 'Errors'}
+                  </Typography>
+                  <Typography variant="body2">
+                    {validationResult.validRows} of {validationResult.totalRows} rows valid
+                    {validationResult.errors.length > 0 && ` • ${validationResult.errors.length} error(s)`}
+                    {validationResult.warnings.length > 0 && ` • ${validationResult.warnings.length} warning(s)`}
+                  </Typography>
+                </Box>
+              </Box>
+              <ExpandMoreIcon
+                sx={{
+                  transform: showValidationDetails ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.3s',
+                }}
+              />
+            </Box>
+
+            {/* Detailed error list */}
+            <Collapse in={showValidationDetails}>
+              <Divider />
+              <Box sx={{ maxHeight: 300, overflow: 'auto', p: 0 }}>
+                {/* Errors */}
+                {validationResult.errors.length > 0 && (
+                  <>
+                    <Box sx={{ px: 2, py: 1, backgroundColor: 'error.lighter' }}>
+                      <Typography variant="subtitle2" color="error.dark" fontWeight="bold">
+                        ❌ Errors ({validationResult.errors.length})
+                      </Typography>
+                    </Box>
+                    <List dense disablePadding>
+                      {validationResult.errors.map((err, index) => (
+                        <ListItem
+                          key={`error-${index}`}
+                          sx={{
+                            py: 1,
+                            px: 2,
+                            borderBottom: '1px solid',
+                            borderColor: 'divider',
+                            '&:last-child': { borderBottom: 'none' },
+                          }}
+                        >
+                          <ListItemIcon sx={{ minWidth: 36 }}>
+                            <ErrorIcon color="error" fontSize="small" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary={
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                {err.row > 0 && (
+                                  <Chip
+                                    label={`Row ${err.row}`}
+                                    size="small"
+                                    color="error"
+                                    variant="outlined"
+                                    sx={{ fontWeight: 'bold' }}
+                                  />
+                                )}
+                                {err.column && (
+                                  <Chip
+                                    label={err.column}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ fontWeight: 'bold' }}
+                                  />
+                                )}
+                              </Box>
+                            }
+                            secondary={
+                              <Box sx={{ mt: 0.5 }}>
+                                <Typography variant="body2" color="text.primary">
+                                  {err.message}
+                                </Typography>
+                                {err.value && (
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                                    Value: "{err.value}"
+                                  </Typography>
+                                )}
+                              </Box>
+                            }
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </>
+                )}
+
+                {/* Warnings */}
+                {validationResult.warnings.length > 0 && (
+                  <>
+                    <Box sx={{ px: 2, py: 1, backgroundColor: 'warning.lighter' }}>
+                      <Typography variant="subtitle2" color="warning.dark" fontWeight="bold">
+                        ⚠️ Warnings ({validationResult.warnings.length})
+                      </Typography>
+                    </Box>
+                    <List dense disablePadding>
+                      {validationResult.warnings.map((warn, index) => (
+                        <ListItem
+                          key={`warning-${index}`}
+                          sx={{
+                            py: 1,
+                            px: 2,
+                            borderBottom: '1px solid',
+                            borderColor: 'divider',
+                            '&:last-child': { borderBottom: 'none' },
+                          }}
+                        >
+                          <ListItemIcon sx={{ minWidth: 36 }}>
+                            <WarningIcon color="warning" fontSize="small" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary={
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                {warn.row > 0 && (
+                                  <Chip
+                                    label={`Row ${warn.row}`}
+                                    size="small"
+                                    color="warning"
+                                    variant="outlined"
+                                    sx={{ fontWeight: 'bold' }}
+                                  />
+                                )}
+                                {warn.column && (
+                                  <Chip
+                                    label={warn.column}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ fontWeight: 'bold' }}
+                                  />
+                                )}
+                              </Box>
+                            }
+                            secondary={
+                              <Box sx={{ mt: 0.5 }}>
+                                <Typography variant="body2" color="text.primary">
+                                  {warn.message}
+                                </Typography>
+                                {warn.value && (
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                                    Value: "{warn.value}"
+                                  </Typography>
+                                )}
+                              </Box>
+                            }
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </>
+                )}
+              </Box>
+            </Collapse>
+          </Paper>
+        )}
+
+        {/* Success message when validation passes */}
+        {validationResult && validationResult.isValid && validationResult.warnings.length === 0 && (
+          <Alert
+            severity="success"
+            icon={<CheckCircleIcon />}
+            sx={{ mb: 2 }}
+          >
+            <AlertTitle>CSV Validation Passed</AlertTitle>
+            Successfully parsed {validationResult.validRows} questions from the CSV file.
           </Alert>
         )}
 

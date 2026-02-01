@@ -125,6 +125,28 @@ const BulkUploadPage: React.FC = () => {
         return;
       }
 
+      // Helper function to remove undefined values from an object (including nested)
+      const removeUndefinedFields = <T extends Record<string, unknown>>(obj: T): T => {
+        const result = { ...obj };
+        Object.keys(result).forEach(key => {
+          if (result[key] === undefined) {
+            delete result[key];
+          }
+        });
+        return result;
+      };
+
+      // Sanitize questions to remove undefined fields (like explanation: undefined)
+      const sanitizedQuestions = data.questions.map(question => removeUndefinedFields({
+        id: question.id,
+        question: question.question,
+        options: question.options,
+        correctAnswer: question.correctAnswer,
+        difficulty: question.difficulty,
+        explanation: question.explanation,
+        isFree: (question as Question & { isFree?: boolean }).isFree,
+      }));
+
       // Create the exam with questions
       const examData = {
         name: data.examName,
@@ -132,7 +154,7 @@ const BulkUploadPage: React.FC = () => {
         numberOfQuestions: data.questions.length,
         timeLimit: data.timeLimit,
         suitableFor: data.suitableFor,
-        questions: data.questions,
+        questions: sanitizedQuestions,
         price: data.isFree ? 0 : data.price,
         currency: data.currency,
         isFree: data.isFree,
@@ -142,6 +164,11 @@ const BulkUploadPage: React.FC = () => {
         updatedAt: Timestamp.now(),
         isActive: true,
       };
+
+      // Remove undefined fields from examData to prevent Firestore errors
+      Object.keys(examData).forEach(key =>
+        examData[key as keyof typeof examData] === undefined && delete examData[key as keyof typeof examData]
+      );
 
       // Save exam to Firestore
       const examRef = await addDoc(collection(db, 'exams'), examData);
@@ -156,6 +183,11 @@ const BulkUploadPage: React.FC = () => {
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         };
+
+        // Remove undefined fields to prevent Firestore errors
+        Object.keys(questionData).forEach(key =>
+          questionData[key as keyof typeof questionData] === undefined && delete questionData[key as keyof typeof questionData]
+        );
 
         return addDoc(collection(db, 'questions'), questionData);
       });
