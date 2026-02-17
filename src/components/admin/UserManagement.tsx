@@ -453,6 +453,7 @@ const UserManagement: React.FC = () => {
                 }
                 sx={{ mb: 2 }}
               >
+                <MenuItem value="user">User</MenuItem>
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="super_admin">Super Admin</MenuItem>
                 <MenuItem value="system_admin">System Admin</MenuItem>
