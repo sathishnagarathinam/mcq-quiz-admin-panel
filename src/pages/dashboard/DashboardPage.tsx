@@ -103,14 +103,25 @@ const DashboardPage: React.FC = () => {
     navigate(path);
   };
 
-  // Navigation cards data
-  const navigationCards = [
+  // Define role-based access for cards
+  interface CardConfig {
+    title: string;
+    description: string;
+    icon: React.ReactNode;
+    path: string;
+    color: string;
+    allowedRoles: ('admin' | 'super_admin' | 'system_admin' | 'user')[];
+  }
+
+  // Navigation cards data with role-based access control
+  const navigationCards: CardConfig[] = [
     {
       title: 'Question Management',
       description: 'Create, edit, and manage quiz questions',
       icon: <QuizIcon />,
       path: '/questions',
       color: '#6366F1',
+      allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
     {
       title: 'Category Management',
@@ -118,6 +129,7 @@ const DashboardPage: React.FC = () => {
       icon: <CategoryIcon />,
       path: '/categories',
       color: '#06B6D4',
+      allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
     {
       title: 'Mobile User Management',
@@ -125,6 +137,7 @@ const DashboardPage: React.FC = () => {
       icon: <MobileIcon />,
       path: '/mobile-users',
       color: '#10B981',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Mobile User Analytics',
@@ -132,6 +145,7 @@ const DashboardPage: React.FC = () => {
       icon: <AnalyticsIcon />,
       path: '/analytics',
       color: '#F59E0B',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Feedback Management',
@@ -139,6 +153,7 @@ const DashboardPage: React.FC = () => {
       icon: <FeedbackIcon />,
       path: '/feedback',
       color: '#8B5CF6',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Bulk Upload',
@@ -146,6 +161,7 @@ const DashboardPage: React.FC = () => {
       icon: <UploadIcon />,
       path: '/bulk-upload',
       color: '#EF4444',
+      allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
     {
       title: 'Settings',
@@ -153,6 +169,7 @@ const DashboardPage: React.FC = () => {
       icon: <SettingsIcon />,
       path: '/settings',
       color: '#8B5CF6',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Banner Management',
@@ -160,6 +177,7 @@ const DashboardPage: React.FC = () => {
       icon: <CampaignIcon />,
       path: '/banner-management',
       color: '#E91E63',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Notification Management',
@@ -167,13 +185,15 @@ const DashboardPage: React.FC = () => {
       icon: <NotificationsIcon />,
       path: '/notifications',
       color: '#FF5722',
-    }, // Updated: v1.0.2 - Notification Management Card
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
+    },
     {
       title: 'Exam Hub',
       description: 'Manage news, tips, previous year papers, and results',
       icon: <ExamHubIcon />,
       path: '/exam-hub',
       color: '#3F51B5',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Payment Management',
@@ -181,6 +201,7 @@ const DashboardPage: React.FC = () => {
       icon: <PaymentIcon />,
       path: '/payments',
       color: '#00BCD4',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
       title: 'Free Quiz Access',
@@ -188,6 +209,7 @@ const DashboardPage: React.FC = () => {
       icon: <GiftIcon />,
       path: '/free-quiz-access',
       color: '#FF6B6B',
+      allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
     {
       title: 'Ratings Management',
@@ -195,6 +217,7 @@ const DashboardPage: React.FC = () => {
       icon: <StarIcon />,
       path: '/ratings',
       color: '#FFC107',
+      allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
     {
       title: 'Live Test Registrations',
@@ -202,6 +225,7 @@ const DashboardPage: React.FC = () => {
       icon: <PeopleIcon />,
       path: '/live-test-registrations',
       color: '#9C27B0',
+      allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
   ];
 
@@ -258,15 +282,26 @@ const DashboardPage: React.FC = () => {
   ];
 
   // System Admin Cards (only for system admins)
-  const systemAdminCards = [
+  const systemAdminCards: CardConfig[] = [
     {
       title: 'Admin User Management',
       description: 'Manage admin users, approve registrations, and assign roles',
       icon: <AdminIcon />,
       path: '/user-management',
       color: '#e91e63',
+      allowedRoles: ['system_admin'],
     },
   ];
+
+  // Helper function to check if user has access to a card
+  const hasAccessToCard = (card: CardConfig): boolean => {
+    if (!adminUser) return false;
+    return card.allowedRoles.includes(adminUser.role);
+  };
+
+  // Filter cards based on user role
+  const visibleNavigationCards = navigationCards.filter(hasAccessToCard);
+  const visibleSystemAdminCards = systemAdminCards.filter(hasAccessToCard);
 
   return (
     <Box>
@@ -376,53 +411,57 @@ const DashboardPage: React.FC = () => {
         </Grid>
       </Grid>
 
-      {/* Navigation Cards */}
-      <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 4, mb: 3 }}>
-        Quick Access
-      </Typography>
+      {/* Navigation Cards - Role-based filtering */}
+      {visibleNavigationCards.length > 0 && (
+        <>
+          <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 4, mb: 3 }}>
+            Quick Access
+          </Typography>
 
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {navigationCards.map((card, index) => (
-          <Grid item xs={12} sm={6} md={4} key={index}>
-            <Card
-              sx={{
-                height: '100%',
-                transition: 'all 0.3s ease-in-out',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 4,
-                },
-              }}
-            >
-              <CardActionArea
-                onClick={() => handleCardClick(card.path)}
-                sx={{ height: '100%', p: 3 }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <Avatar
-                    sx={{
-                      bgcolor: card.color,
-                      mr: 2,
-                      width: 56,
-                      height: 56,
-                    }}
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            {visibleNavigationCards.map((card, index) => (
+              <Grid item xs={12} sm={6} md={4} key={index}>
+                <Card
+                  sx={{
+                    height: '100%',
+                    transition: 'all 0.3s ease-in-out',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: 4,
+                    },
+                  }}
+                >
+                  <CardActionArea
+                    onClick={() => handleCardClick(card.path)}
+                    sx={{ height: '100%', p: 3 }}
                   >
-                    {card.icon}
-                  </Avatar>
-                  <Box>
-                    <Typography variant="h6" component="h3" gutterBottom>
-                      {card.title}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {card.description}
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardActionArea>
-            </Card>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      <Avatar
+                        sx={{
+                          bgcolor: card.color,
+                          mr: 2,
+                          width: 56,
+                          height: 56,
+                        }}
+                      >
+                        {card.icon}
+                      </Avatar>
+                      <Box>
+                        <Typography variant="h6" component="h3" gutterBottom>
+                          {card.title}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {card.description}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </CardActionArea>
+                </Card>
+              </Grid>
+            ))}
           </Grid>
-        ))}
-      </Grid>
+        </>
+      )}
 
       {/* Debug Info (temporary) */}
       {process.env.NODE_ENV === 'development' && (
@@ -434,15 +473,15 @@ const DashboardPage: React.FC = () => {
         </Box>
       )}
 
-      {/* System Admin Tools */}
-      {(adminUser?.role === 'system_admin' || process.env.NODE_ENV === 'development') && (
+      {/* System Admin Tools - Role-based filtering */}
+      {visibleSystemAdminCards.length > 0 && (
         <>
           <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 4, mb: 3 }}>
             👑 System Administration
           </Typography>
 
           <Grid container spacing={3} sx={{ mb: 4 }}>
-            {systemAdminCards.map((card, index) => (
+            {visibleSystemAdminCards.map((card, index) => (
               <Grid item xs={12} sm={6} md={4} key={index}>
                 <Card
                   sx={{
