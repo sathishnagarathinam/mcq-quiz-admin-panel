@@ -227,6 +227,14 @@ const DashboardPage: React.FC = () => {
       color: '#9C27B0',
       allowedRoles: ['admin', 'super_admin', 'system_admin', 'user'],
     },
+    {
+      title: 'Interstitial Ad Management',
+      description: 'Manage full-screen promotional ads displayed in mobile app',
+      icon: <CampaignIcon />,
+      path: '/interstitial-ads',
+      color: '#FF6B6B',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
+    },
   ];
 
   const testCards = [

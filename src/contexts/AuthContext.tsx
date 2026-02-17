@@ -16,7 +16,7 @@ interface AdminUser {
   uid: string;
   email: string;
   name: string;
-  role: 'admin' | 'super_admin' | 'system_admin';
+  role: 'admin' | 'super_admin' | 'system_admin' | 'user';
   createdAt: any;
   lastLogin?: any;
   isActive: boolean;
