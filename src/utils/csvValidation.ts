@@ -17,6 +17,11 @@ export interface CSVValidationError {
   value?: string;        // The problematic value (if applicable)
 }
 
+// Metadata extracted from CSV
+export interface CSVMetadata {
+  topic?: string;
+}
+
 // Result of CSV validation
 export interface CSVValidationResult<T> {
   isValid: boolean;
@@ -26,6 +31,7 @@ export interface CSVValidationResult<T> {
   totalRows: number;
   validRows: number;
   skippedRows: number;
+  metadata?: CSVMetadata;
 }
 
 // Column definition for validation
@@ -111,6 +117,13 @@ export const QUESTION_CSV_SCHEMA: CSVSchema = {
       required: false,
       type: 'string',
       maxLength: 2000,
+    },
+    {
+      name: 'topic',
+      aliases: ['topic_name', 'subject', 'category'],
+      required: false,
+      type: 'string',
+      maxLength: 200,
     },
   ],
   minRows: 1,
@@ -393,6 +406,16 @@ export function validateQuestionCSV(csvText: string): CSVValidationResult<Parsed
   const rowsToProcess = schema.maxRows ? Math.min(dataRowCount, schema.maxRows) : dataRowCount;
   const seenQuestions = new Map<string, number>(); // For duplicate detection
 
+  // Extract topic from first data row (if topic column exists)
+  let extractedTopic: string | undefined;
+  const topicColumnIndex = columnMap.get('topic');
+  if (topicColumnIndex !== undefined && lines.length > 1) {
+    const firstDataRow = parseCSVLine(lines[1]);
+    if (firstDataRow[topicColumnIndex]) {
+      extractedTopic = firstDataRow[topicColumnIndex].replace(/^"|"$/g, '').trim();
+    }
+  }
+
   for (let i = 1; i <= rowsToProcess; i++) {
     const rowErrors: CSVValidationError[] = [];
     const values = parseCSVLine(lines[i]);
@@ -494,6 +517,30 @@ export function validateQuestionCSV(csvText: string): CSVValidationResult<Parsed
       continue;
     }
 
+    // Validate that "None of the above" and "All of the above" are only in the last position
+    const specialOptionPatterns = ['none of the above', 'all of the above'];
+    let hasSpecialOptionError = false;
+    for (let j = 0; j < options.length - 1; j++) {
+      const optionLower = options[j].toLowerCase();
+      if (specialOptionPatterns.some(pattern => optionLower.includes(pattern))) {
+        errors.push({
+          row: rowNumber,
+          column: 'options',
+          columnIndex: null,
+          field: 'options',
+          message: `"${options[j]}" can only be placed as the last option (Option 4)`,
+          severity: 'error',
+        });
+        hasSpecialOptionError = true;
+        break;
+      }
+    }
+
+    if (hasSpecialOptionError) {
+      skippedRows++;
+      continue;
+    }
+
     // Add valid question
     const parsedQuestion: ParsedQuestion = {
       id: `bulk_${Date.now()}_${i}`,
@@ -515,6 +562,7 @@ export function validateQuestionCSV(csvText: string): CSVValidationResult<Parsed
     totalRows: lines.length - 1,
     validRows: data.length,
     skippedRows,
+    metadata: extractedTopic ? { topic: extractedTopic } : undefined,
   };
 }
 

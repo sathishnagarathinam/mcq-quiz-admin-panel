@@ -41,7 +41,7 @@
 ## 🚀 Build in 5 Minutes
 
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release
@@ -149,7 +149,7 @@ flutter build appbundle --release
 
 ### **Step 1: Build** (5-10 min)
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release
@@ -242,7 +242,7 @@ All checklists are prepared.
 
 **Build Command**:
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release

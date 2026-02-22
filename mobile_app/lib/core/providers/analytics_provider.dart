@@ -39,11 +39,20 @@ final realtimeRecentAttemptsProvider =
   return realtimeService.recentAttemptsStream;
 });
 
-/// Provider for current user analytics
+/// Provider for current user analytics (real-time stream)
+/// Changed from FutureProvider to StreamProvider for real-time updates
 final currentUserAnalyticsProvider =
-    FutureProvider<UserAnalyticsModel?>((ref) async {
-  final analyticsService = ref.read(analyticsServiceProvider);
-  return await analyticsService.getCurrentUserAnalytics();
+    StreamProvider<UserAnalyticsModel?>((ref) async* {
+  final realtimeService = ref.read(realtimeAnalyticsServiceProvider);
+
+  // Set current user ID (supports both Firebase Auth and phone auth)
+  await realtimeService.setCurrentUserId();
+
+  // Start listening to user analytics
+  realtimeService.startUserAnalyticsListener();
+
+  // Yield from the stream
+  yield* realtimeService.userAnalyticsStream;
 });
 
 /// Provider for user analytics by ID

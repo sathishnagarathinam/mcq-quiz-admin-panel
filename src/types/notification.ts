@@ -61,6 +61,7 @@ export interface NotificationStats {
 
 export interface MobileUser {
   uid: string;
+  docId?: string; // Actual Firestore document ID (may differ from uid for phone-only users)
   name: string;
   email: string;
   phoneNumber: string;

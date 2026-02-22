@@ -91,6 +91,7 @@ interface BulkUploadData {
   isFree: boolean;
   freeQuestionsLimit?: number;
   unlockPrice?: number;
+  topic?: string;
 }
 
 interface ExamType {
@@ -138,6 +139,7 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
     isFree: true,
     freeQuestionsLimit: -1,
     unlockPrice: 0,
+    topic: '',
   });
   const [parsedQuestions, setParsedQuestions] = useState<Question[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -198,6 +200,11 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
           }));
           setParsedQuestions(questions);
           setShowPreview(true);
+
+          // Auto-populate topic field from CSV metadata if available
+          if (result.metadata?.topic) {
+            setExamConfig(prev => ({ ...prev, topic: result.metadata!.topic! }));
+          }
         }
 
         // Show summary error if there are critical issues
@@ -273,6 +280,7 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
       isFree: true,
       freeQuestionsLimit: -1,
       unlockPrice: 0,
+      topic: '',
     });
     setParsedQuestions([]);
     setShowPreview(false);
@@ -625,7 +633,18 @@ const BulkUploadCard: React.FC<BulkUploadCardProps> = ({ onUploadComplete, examT
                   required
                 />
               </Grid>
-              
+
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Topic"
+                  value={examConfig.topic}
+                  onChange={(e) => setExamConfig({ ...examConfig, topic: e.target.value })}
+                  placeholder="Enter exam topic (e.g., Mathematics, Science)"
+                  helperText="Optional: Topic will be displayed on the quiz instruction page"
+                />
+              </Grid>
+
               <Grid item xs={12} sm={6}>
                 <FormControl fullWidth required>
                   <InputLabel>Exam Type</InputLabel>

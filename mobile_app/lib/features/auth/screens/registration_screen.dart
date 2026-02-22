@@ -13,7 +13,14 @@ import '../widgets/animated_background.dart';
 import '../widgets/phone_input_field.dart';
 
 class RegistrationScreen extends ConsumerStatefulWidget {
-  const RegistrationScreen({super.key});
+  final String? phoneNumber;
+  final String? countryCode;
+
+  const RegistrationScreen({
+    super.key,
+    this.phoneNumber,
+    this.countryCode,
+  });
 
   @override
   ConsumerState<RegistrationScreen> createState() => _RegistrationScreenState();
@@ -55,6 +62,18 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen>
   void initState() {
     super.initState();
     _setupAnimations();
+
+    // If phone number is passed from login flow, populate it
+    if (widget.phoneNumber != null && widget.phoneNumber!.isNotEmpty) {
+      // Extract phone number without country code
+      String phoneWithoutCode = widget.phoneNumber!;
+      if (widget.countryCode != null) {
+        phoneWithoutCode =
+            widget.phoneNumber!.replaceFirst(widget.countryCode!, '');
+      }
+      _phoneController.text = phoneWithoutCode;
+      _countryCode = widget.countryCode ?? '+91';
+    }
   }
 
   void _setupAnimations() {
@@ -463,7 +482,7 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen>
                 ),
               ),
               TextButton(
-                onPressed: () => context.pop(),
+                onPressed: () => context.go('/auth/login'),
                 child: Text(
                   'Sign In',
                   style: GoogleFonts.poppins(
@@ -558,6 +577,7 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen>
       'email': _emailController.text.trim(),
       'officeName': _officeNameController.text.trim(),
       'designation': _selectedDesignation,
+      'phoneNumber': phoneNumber,
     };
     final success = await ref
         .read(authProvider.notifier)

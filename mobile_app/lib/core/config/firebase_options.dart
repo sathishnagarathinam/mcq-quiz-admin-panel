@@ -54,8 +54,8 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyD2Y_N_F4--WNucvy4-Qvcidw8YIfodRm8',
-    appId: '1:109048215498:android:c0ac280012cca252b08133',
+    apiKey: 'AIzaSyDspopkPaJ8R_xJGW7GoO8FHGvP9VyoL2o',
+    appId: '1:109048215498:android:2a93ecbf967c3533b08133',
     messagingSenderId: '109048215498',
     projectId: 'mcq-quiz-system',
     storageBucket: 'mcq-quiz-system.firebasestorage.app',

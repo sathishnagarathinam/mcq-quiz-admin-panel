@@ -50,6 +50,7 @@ interface BulkUploadData {
   isFree: boolean;
   freeQuestionsLimit?: number;
   unlockPrice?: number;
+  topic?: string;
 }
 
 interface ExamType {
@@ -160,6 +161,7 @@ const BulkUploadPage: React.FC = () => {
         isFree: data.isFree,
         freeQuestionsLimit: data.freeQuestionsLimit ?? -1,
         unlockPrice: data.unlockPrice ?? 0,
+        topic: data.topic || '',
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
         isActive: true,

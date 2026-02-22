@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
-
+  Badge,
   Typography,
   Grid,
   Card,
@@ -11,7 +11,6 @@ import {
   CardActionArea,
   Avatar,
   CircularProgress,
-
 } from '@mui/material';
 import {
   Quiz as QuizIcon,
@@ -33,8 +32,10 @@ import {
   Payment as PaymentIcon,
   CardGiftcard as GiftIcon,
   Star as StarIcon,
+  Image as ImageIcon,
+  SmartToy as ChatbotIcon,
 } from '@mui/icons-material';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import UserManagement from '../../components/admin/UserManagement';
@@ -56,9 +57,26 @@ const DashboardPage: React.FC = () => {
     totalQuestions: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [pendingTicketsCount, setPendingTicketsCount] = useState(0);
 
   useEffect(() => {
     fetchExamStats();
+  }, []);
+
+  // Real-time listener for pending support tickets count
+  useEffect(() => {
+    const ticketsQuery = query(
+      collection(db, 'support_tickets'),
+      where('status', 'in', ['open', 'inProgress'])
+    );
+
+    const unsubscribe = onSnapshot(ticketsQuery, (snapshot) => {
+      setPendingTicketsCount(snapshot.size);
+    }, (error) => {
+      console.error('Error listening to pending tickets:', error);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const fetchExamStats = async () => {
@@ -104,6 +122,9 @@ const DashboardPage: React.FC = () => {
   };
 
   // Navigation cards data
+  // Paths allowed for the 'user' role
+  const userRoleAllowedPaths = ['/questions', '/categories', '/bulk-upload', '/ratings', '/live-test-registrations'];
+
   const navigationCards = [
     {
       title: 'Question Management',
@@ -202,6 +223,26 @@ const DashboardPage: React.FC = () => {
       icon: <PeopleIcon />,
       path: '/live-test-registrations',
       color: '#9C27B0',
+    },
+    {
+      title: 'Interstitial Ads',
+      description: 'Create and manage full-screen advertisements for mobile app',
+      icon: <ImageIcon />,
+      path: '/interstitial-ads',
+      color: '#FF6B9D',
+    },
+    {
+      title: 'Chatbot Management',
+      description: 'Manage chatbot solutions, view support tickets, and analytics',
+      icon: pendingTicketsCount > 0 ? (
+        <Badge badgeContent={pendingTicketsCount} color="error" max={99}>
+          <ChatbotIcon />
+        </Badge>
+      ) : (
+        <ChatbotIcon />
+      ),
+      path: '/chatbot',
+      color: '#00BCD4',
     },
   ];
 
@@ -382,7 +423,9 @@ const DashboardPage: React.FC = () => {
       </Typography>
 
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        {navigationCards.map((card, index) => (
+        {navigationCards
+          .filter(card => adminUser?.role !== 'user' || userRoleAllowedPaths.includes(card.path))
+          .map((card, index) => (
           <Grid item xs={12} sm={6} md={4} key={index}>
             <Card
               sx={{
@@ -435,7 +478,7 @@ const DashboardPage: React.FC = () => {
       )}
 
       {/* System Admin Tools */}
-      {(adminUser?.role === 'system_admin' || process.env.NODE_ENV === 'development') && (
+      {adminUser?.role !== 'user' && (adminUser?.role === 'system_admin' || process.env.NODE_ENV === 'development') && (
         <>
           <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 4, mb: 3 }}>
             👑 System Administration
@@ -488,7 +531,9 @@ const DashboardPage: React.FC = () => {
         </>
       )}
 
-      {/* Test Tools */}
+      {/* Test Tools - hidden for 'user' role */}
+      {adminUser?.role !== 'user' && (
+      <>
       <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 4, mb: 3 }}>
         Development Tools
       </Typography>
@@ -535,6 +580,8 @@ const DashboardPage: React.FC = () => {
           </Grid>
         ))}
       </Grid>
+      </>
+      )}
 
       {/* System Admin Section */}
       {adminUser?.role === 'system_admin' && (

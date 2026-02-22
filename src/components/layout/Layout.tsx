@@ -58,7 +58,8 @@ export const Layout: React.FC = () => {
                   sx={{
                     backgroundColor:
                       adminUser.role === 'system_admin' ? '#ff5722' :
-                      adminUser.role === 'super_admin' ? 'gold' : 'lightblue',
+                      adminUser.role === 'super_admin' ? 'gold' :
+                      adminUser.role === 'user' ? '#90caf9' : 'lightblue',
                     color: adminUser.role === 'system_admin' ? 'white' : 'black',
                     fontSize: '0.7rem',
                     height: 20,

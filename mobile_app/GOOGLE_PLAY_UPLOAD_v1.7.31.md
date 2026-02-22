@@ -3,7 +3,7 @@
 ## 📦 Bundle Details
 
 **File Name:** `DakshinPostalAcademy_v1.7.31+39_GooglePlay_Release_16KB_20260114_080618.aab`  
-**Location:** `/Volumes/sathish/mcq/mobile_app/`  
+**Location:** `/Volumes/work/mcq/mobile_app/`
 **Size:** 65 MB  
 **Format:** Android App Bundle (AAB)  
 **16KB Support:** ✅ Yes  

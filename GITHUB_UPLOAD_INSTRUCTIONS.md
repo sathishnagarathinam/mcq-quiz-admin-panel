@@ -45,7 +45,7 @@ After creating the repository, GitHub will show you commands. Use these commands
 
 ```bash
 # Navigate to the web_admin directory (if not already there)
-cd /Volumes/sathish/mcq/web_admin
+cd /Volumes/work/mcq/web_admin
 
 # Add the GitHub repository as remote origin
 git remote add origin https://github.com/sathishnagarathinam/mcq-quiz-admin-panel.git

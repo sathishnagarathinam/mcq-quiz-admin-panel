@@ -2,21 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart' as provider;
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/models/exam_model.dart';
 import '../../../core/services/exam_service.dart';
 import '../../../core/services/paid_quiz_access_service.dart';
+import '../../../core/services/auth_helper_service.dart';
+import '../../../core/services/quiz_statistics_service.dart';
 import '../../../core/models/paid_quiz_access_model.dart';
-import '../../../shared/widgets/loading_button.dart';
-import '../../../core/providers/payment_provider.dart';
-import '../../../core/providers/mobile_user_auth_provider.dart';
 import '../../payment/widgets/payment_confirmation_dialog.dart';
 import '../widgets/quiz_sharing_widget.dart';
+import 'quiz_ratings_page.dart';
 
 /// Quiz instruction screen that shows before starting the quiz
 class QuizInstructionScreen extends ConsumerStatefulWidget {
@@ -38,6 +35,12 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
   String? _error;
   Map<String, dynamic>? _accessDetails;
 
+  // Quiz statistics
+  Map<String, dynamic>? _quizStatistics;
+  int? _userHighestScore;
+  int? _userAttemptCount;
+  bool _hasUserAttempted = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,15 +50,15 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
   /// Check if user is authenticated before loading exam
   Future<void> _checkAuthenticationAndLoadExam() async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      // Check for both Firebase Auth and phone auth
+      final isAuthenticated = await AuthHelperService.isUserAuthenticated();
 
       // If user is not authenticated, redirect to login
-      if (user == null) {
+      if (!isAuthenticated) {
         debugPrint('⚠️ User not authenticated, redirecting to login');
         if (mounted) {
           // Store the quiz ID to return after login
-          context.go('/auth/email-login',
-              extra: {'returnToQuizId': widget.quizId});
+          context.go('/auth/login', extra: {'returnToQuizId': widget.quizId});
         }
         return;
       }
@@ -141,6 +144,8 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
                 discountPercentage: discountPercentage,
                 bannerRoutedFrom: bannerRoutedFrom,
                 couponCode: couponCode,
+                freeQuestionsLimit: exam.freeQuestionsLimit,
+                unlockPrice: exam.unlockPrice,
               );
             }
           }
@@ -149,11 +154,27 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
         }
       }
 
-      // Load access details for paid quizzes
-      final accessDetails = await PaidQuizAccessService.getAccessDetails(
-        examId: widget.quizId,
-        exam: examWithDiscount,
-      );
+      // Step 2: Get user ID early so we can parallelize user-specific queries
+      final userId = await AuthHelperService.getCurrentUserId();
+
+      // Step 3: Load all remaining data in parallel
+      // These can all be fetched at the same time
+      final results = await Future.wait([
+        PaidQuizAccessService.getAccessDetails(
+          examId: widget.quizId,
+          exam: examWithDiscount,
+        ),
+        QuizStatisticsService.getQuizStatistics(widget.quizId),
+        if (userId != null)
+          QuizStatisticsService.getUserQuizAttempts(userId, widget.quizId)
+        else
+          Future.value(<Map<String, dynamic>>[]),
+      ]);
+
+      final accessDetails = results[0] as Map<String, dynamic>;
+      final quizStats = results[1] as Map<String, dynamic>;
+      final userAttempts =
+          results[2] as List<Map<String, dynamic>>? ?? <Map<String, dynamic>>[];
 
       debugPrint('📋 Access details loaded:');
       debugPrint('   - Status: ${accessDetails['status']}');
@@ -161,9 +182,34 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
       debugPrint('   - Show Payment: ${accessDetails['showPayment']}');
       debugPrint('   - Message: ${accessDetails['message']}');
 
+      debugPrint('📊 Quiz statistics loaded:');
+      debugPrint('   - Total Attempts: ${quizStats['totalAttempts']}');
+      debugPrint('   - Average Rating: ${quizStats['averageRating']}');
+      debugPrint('   - Total Ratings: ${quizStats['totalRatings']}');
+
+      // Calculate user statistics from attempts
+      int userAttemptCount = userAttempts.length;
+      bool hasUserAttempted = userAttemptCount > 0;
+      int? userHighestScore;
+
+      if (hasUserAttempted) {
+        final scores =
+            userAttempts.map((a) => a['score'] as int? ?? 0).toList();
+        userHighestScore =
+            scores.isEmpty ? null : scores.reduce((a, b) => a > b ? a : b);
+
+        debugPrint('👤 User statistics loaded:');
+        debugPrint('   - User Attempts: $userAttemptCount');
+        debugPrint('   - User Highest Score: $userHighestScore');
+      }
+
       setState(() {
         _exam = examWithDiscount;
         _accessDetails = accessDetails;
+        _quizStatistics = quizStats;
+        _userHighestScore = userHighestScore;
+        _userAttemptCount = userAttemptCount;
+        _hasUserAttempted = hasUserAttempted;
         _isLoading = false;
       });
     } catch (e) {
@@ -315,6 +361,11 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
 
           const SizedBox(height: 24),
 
+          // Quiz Statistics Card (above details)
+          _buildStatisticsCard(),
+
+          const SizedBox(height: 24),
+
           // Quiz Details
           _buildDetailCard(),
 
@@ -326,52 +377,7 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
           const SizedBox(height: 32),
 
           // Action Buttons
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    side: BorderSide(color: AppTheme.primaryColor),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'Close',
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                flex: 2,
-                child: ElevatedButton(
-                  onPressed: _startQuiz,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _getButtonColor(),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    _getButtonText(),
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          _buildActionButtons(),
 
           const SizedBox(height: 20),
         ],
@@ -462,12 +468,19 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            message,
+            _getAccessMessage(status, message),
             style: GoogleFonts.poppins(
               fontSize: 14,
               color: textColor,
             ),
           ),
+          // Show freemium info if applicable
+          if (_exam != null &&
+              _exam!.isFreemium &&
+              status == QuizAccessStatus.free) ...[
+            const SizedBox(height: 8),
+            _buildFreemiumInfo(),
+          ],
           if (status == QuizAccessStatus.purchased) ...[
             const SizedBox(height: 8),
             _buildAccessDetails(),
@@ -478,6 +491,130 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  /// Get access message, customized for freemium quizzes
+  String _getAccessMessage(QuizAccessStatus status, String defaultMessage) {
+    if (_exam == null) return defaultMessage;
+
+    if (status == QuizAccessStatus.free && _exam!.isFreemium) {
+      final freeCount = _exam!.freeQuestionCount;
+      final totalCount = _exam!.numberOfQuestions;
+      return '$freeCount out of $totalCount questions are free to attempt';
+    }
+
+    return defaultMessage;
+  }
+
+  /// Build freemium info widget showing free vs paid questions
+  Widget _buildFreemiumInfo() {
+    if (_exam == null) return const SizedBox.shrink();
+
+    final freeCount = _exam!.freeQuestionCount;
+    final paidCount = _exam!.paidQuestionCount;
+    final unlockPrice =
+        _exam!.unlockPrice > 0 ? _exam!.unlockPrice : _exam!.price;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.blue.shade700, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Freemium Quiz',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.blue.shade700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFreemiumStat(
+                  Icons.check_circle,
+                  Colors.green,
+                  '$freeCount Free',
+                ),
+              ),
+              Expanded(
+                child: _buildFreemiumStat(
+                  Icons.lock,
+                  Colors.orange,
+                  '$paidCount Paid',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Pay ',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  TextSpan(
+                    text: '₹${unlockPrice.toStringAsFixed(0)}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange.shade700,
+                    ),
+                  ),
+                  TextSpan(
+                    text: ' after free questions to unlock all',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFreemiumStat(IconData icon, Color color, String text) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 16),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: AppTheme.textPrimaryColor,
+          ),
+        ),
+      ],
     );
   }
 
@@ -603,6 +740,241 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Build statistics card with column layout - displayed above quiz details
+  Widget _buildStatisticsCard() {
+    final totalAttempts = _quizStatistics?['totalAttempts'] ?? 0;
+    final highestScore = _quizStatistics?['highestScore'] ?? 0;
+    final averageRating = (_quizStatistics?['averageRating'] ?? 0.0) as double;
+    final totalRatings = _quizStatistics?['totalRatings'] ?? 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Quiz Statistics',
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimaryColor,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Statistics in column layout
+          _buildStatRow(
+            Icons.emoji_events,
+            Colors.amber,
+            'Highest Score',
+            '$highestScore/${_exam?.numberOfQuestions ?? 0}',
+          ),
+          const SizedBox(height: 12),
+          _buildStatRow(
+            Icons.group,
+            Colors.blue,
+            'Total Attempts',
+            '$totalAttempts',
+          ),
+          const SizedBox(height: 12),
+
+          // Rating row - clickable to see all reviews
+          _buildClickableRatingRow(averageRating, totalRatings),
+
+          // User-specific statistics
+          if (_hasUserAttempted) ...[
+            const SizedBox(height: 16),
+            Divider(color: AppTheme.borderColor),
+            const SizedBox(height: 16),
+            Text(
+              'Your Performance',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimaryColor,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildStatRow(
+              Icons.replay,
+              Colors.purple,
+              'Your Attempts',
+              '$_userAttemptCount',
+            ),
+            if (_userHighestScore != null) ...[
+              const SizedBox(height: 12),
+              _buildStatRow(
+                Icons.star,
+                Colors.green,
+                'Your Best Score',
+                '$_userHighestScore/${_exam?.numberOfQuestions ?? 0}',
+              ),
+            ],
+          ],
+
+          // Show "Not attempted yet" if user hasn't attempted
+          if (!_hasUserAttempted) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline,
+                      color: Colors.grey.shade600, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'You haven\'t attempted this quiz yet',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatRow(IconData icon, Color color, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: AppTheme.textSecondaryColor,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimaryColor,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Clickable rating row that navigates to ratings page
+  Widget _buildClickableRatingRow(double averageRating, int totalRatings) {
+    return InkWell(
+      onTap: () => _navigateToRatingsPage(),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.amber.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.star, color: Colors.amber, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        averageRating.toStringAsFixed(1),
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimaryColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      ...List.generate(5, (index) {
+                        if (index < averageRating.floor()) {
+                          return const Icon(Icons.star,
+                              size: 14, color: Colors.amber);
+                        } else if (index < averageRating) {
+                          return const Icon(Icons.star_half,
+                              size: 14, color: Colors.amber);
+                        } else {
+                          return Icon(Icons.star_border,
+                              size: 14, color: Colors.grey[400]);
+                        }
+                      }),
+                    ],
+                  ),
+                  Text(
+                    '$totalRatings ${totalRatings == 1 ? 'review' : 'reviews'}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: AppTheme.textSecondaryColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: Colors.amber.shade700,
+              size: 24,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Navigate to ratings page
+  void _navigateToRatingsPage() {
+    if (_exam == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => QuizRatingsPage(
+          examId: _exam!.id,
+          examName: _exam!.name,
+        ),
+      ),
     );
   }
 
@@ -745,6 +1117,273 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
     );
   }
 
+  /// Build action buttons based on quiz type (free, paid, freemium)
+  Widget _buildActionButtons() {
+    final isFreemium = _exam?.isFreemium ?? false;
+    final unlockPrice = _exam?.unlockPrice ?? 0.0;
+
+    // Check if user has already purchased access for this freemium quiz
+    final accessStatus = _accessDetails?['status'] as QuizAccessStatus?;
+    final hasAlreadyPaid = accessStatus == QuizAccessStatus.purchased;
+
+    // For freemium quizzes, show Start Quiz and optionally Pay Now button
+    if (isFreemium) {
+      return Column(
+        children: [
+          // Row with Close and Start Quiz buttons
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: BorderSide(color: AppTheme.primaryColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Close',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: _startQuiz,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Start Quiz',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // Only show Pay button if user has NOT already paid
+          if (!hasAlreadyPaid) ...[
+            const SizedBox(height: 12),
+            // Pay Now button for freemium quizzes
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _payToUnlockFullQuiz,
+                icon: const Icon(Icons.lock_open, size: 20),
+                label: Text(
+                  'Pay ₹${unlockPrice.toStringAsFixed(0)} to Unlock All Questions',
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    // For regular quizzes (free or paid)
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              side: BorderSide(color: AppTheme.primaryColor),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text(
+              'Close',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.primaryColor,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          flex: 2,
+          child: ElevatedButton(
+            onPressed: _startQuiz,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _getButtonColor(),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text(
+              _getButtonText(),
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Pay to unlock full quiz (for freemium quizzes)
+  void _payToUnlockFullQuiz() async {
+    if (_exam == null) return;
+
+    // Show payment dialog with unlock price
+    _showFreemiumPaymentDialog();
+  }
+
+  /// Show payment dialog for freemium quiz unlock
+  void _showFreemiumPaymentDialog() async {
+    if (_exam == null) return;
+
+    // Use AuthHelperService to get user details (supports both Firebase Auth and phone auth)
+    final isAuthenticated = await AuthHelperService.isUserAuthenticated();
+    if (!isAuthenticated) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please login to proceed with payment'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final userId = await AuthHelperService.getCurrentUserId();
+    final userEmail = await AuthHelperService.getCurrentEmail() ?? '';
+    final userPhone = await AuthHelperService.getCurrentPhoneNumber();
+
+    debugPrint(
+        '🔐 Freemium Payment - userId: $userId, email: $userEmail, phone: $userPhone');
+
+    if (userId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please login to proceed with payment'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (userPhone == null || userPhone.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please update your profile with a valid mobile number before making payment.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+
+    // Create a modified exam with unlock price for payment
+    // Include discount information from banner if available
+    final freemiumExam = ExamModel(
+      id: _exam!.id,
+      name: _exam!.name,
+      examType: _exam!.examType,
+      customName: _exam!.customName,
+      numberOfQuestions: _exam!.numberOfQuestions,
+      timeLimit: _exam!.timeLimit,
+      suitableFor: _exam!.suitableFor,
+      questions: _exam!.questions,
+      createdAt: _exam!.createdAt,
+      updatedAt: _exam!.updatedAt,
+      isActive: _exam!.isActive,
+      totalAttempts: _exam!.totalAttempts,
+      isTrending: _exam!.isTrending,
+      trendingPriority: _exam!.trendingPriority,
+      price: _exam!.unlockPrice, // Use unlock price for payment
+      currency: _exam!.currency,
+      isFree: false,
+      shareCount: _exam!.shareCount,
+      lastSharedAt: _exam!.lastSharedAt,
+      freeQuestionsLimit: _exam!.freeQuestionsLimit,
+      unlockPrice: _exam!.unlockPrice,
+      discountPercentage:
+          _exam!.discountPercentage, // Apply discount from banner
+      bannerRoutedFrom: _exam!.bannerRoutedFrom,
+      couponCode: _exam!.couponCode,
+    );
+
+    debugPrint('💳 Freemium Payment Dialog:');
+    debugPrint('   - Unlock Price: ₹${freemiumExam.price}');
+    debugPrint('   - Discount: ${freemiumExam.discountPercentage}%');
+    debugPrint('   - Has Discount: ${freemiumExam.hasDiscount}');
+    debugPrint('   - Discounted Price: ₹${freemiumExam.discountedPrice}');
+
+    showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PaymentConfirmationDialog(
+        exam: freemiumExam,
+        onCancel: () {
+          if (mounted) {
+            _loadExam();
+          }
+        },
+        userId: userId,
+        userEmail: userEmail,
+        userPhone: userPhone,
+      ),
+    ).then((result) {
+      if (result == true && mounted) {
+        debugPrint('💳 Freemium payment successful');
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            _loadExam();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Full quiz unlocked! You can now access all questions.'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        });
+      }
+    });
+  }
+
   /// Get button text based on quiz access status
   String _getButtonText() {
     if (_exam == null || _accessDetails == null) return 'Start Quiz';
@@ -797,9 +1436,14 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
       await PaidQuizAccessService.recordQuizAttempt(widget.quizId);
     }
 
-    // Start the quiz
+    // Start the quiz with discount info if available
     if (mounted) {
-      context.goToQuiz(widget.quizId);
+      context.goToQuiz(
+        widget.quizId,
+        discountPercentage: _exam!.discountPercentage,
+        couponCode: _exam!.couponCode,
+        bannerRoutedFrom: _exam!.bannerRoutedFrom,
+      );
     }
   }
 
@@ -807,50 +1451,27 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
   void _showPaymentDialog() async {
     if (_exam == null) return;
 
-    String? userId;
-    String userEmail = '';
-    String? userPhone;
-
-    // Always check Firebase Auth first as it's the source of truth
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-
-    // Debug logging
-    debugPrint('🔐 Payment Dialog - Firebase User: ${firebaseUser?.uid}');
-
-    // Prefer MobileUser from Riverpod provider (loaded from Firestore)
-    final authState = ref.read(mobileUserAuthProvider);
-    final currentUser = authState.user;
-
-    debugPrint('🔐 Payment Dialog - MobileUser: ${currentUser?.uid}');
-    debugPrint(
-        '🔐 Payment Dialog - isAuthenticated: ${authState.isAuthenticated}');
-
-    if (currentUser != null) {
-      userId = currentUser.uid;
-      userEmail = currentUser.email;
-      userPhone = currentUser.phoneNumber;
-    } else if (firebaseUser != null) {
-      // Fallback to Firebase Auth if Riverpod provider doesn't have user yet
-      userId = firebaseUser.uid;
-      userEmail = firebaseUser.email ?? '';
-
-      try {
-        final mobileUserDoc = await FirebaseFirestore.instance
-            .collection('mobile_users')
-            .doc(firebaseUser.uid)
-            .get();
-        final data = mobileUserDoc.data();
-        userPhone =
-            (data?['phoneNumber'] as String?) ?? firebaseUser.phoneNumber;
-      } catch (e) {
-        // If Firestore lookup fails, fall back to Firebase Auth phoneNumber (may be null)
-        debugPrint('Error loading user phone number for payment: $e');
-        userPhone = firebaseUser.phoneNumber;
-      }
-
+    // Use AuthHelperService to get user details (supports both Firebase Auth and phone auth)
+    final isAuthenticated = await AuthHelperService.isUserAuthenticated();
+    if (!isAuthenticated) {
       if (!mounted) return;
-    } else {
-      // Neither Riverpod nor Firebase Auth has the user - truly not logged in
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please login to proceed with payment'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final userId = await AuthHelperService.getCurrentUserId();
+    final userEmail = await AuthHelperService.getCurrentEmail() ?? '';
+    final userPhone = await AuthHelperService.getCurrentPhoneNumber();
+
+    debugPrint(
+        '🔐 Payment Dialog - userId: $userId, email: $userEmail, phone: $userPhone');
+
+    if (userId == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -889,9 +1510,9 @@ class _QuizInstructionScreenState extends ConsumerState<QuizInstructionScreen> {
             _loadExam(); // Refresh to check if access was granted
           }
         },
-        userId: userId!,
+        userId: userId,
         userEmail: userEmail,
-        userPhone: userPhone!,
+        userPhone: userPhone,
       ),
     ).then((result) {
       // Handle dialog result

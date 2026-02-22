@@ -452,6 +452,18 @@ const CategoriesPage: React.FC = () => {
       return;
     }
 
+    // Validate that "None of the above" and "All of the above" are only in the last position
+    const specialOptionPatterns = ['none of the above', 'all of the above'];
+    const options = questionForm.options || [];
+
+    for (let i = 0; i < options.length - 1; i++) {
+      const optionLower = options[i].toLowerCase();
+      if (specialOptionPatterns.some(pattern => optionLower.includes(pattern))) {
+        toast.error(`"${options[i]}" can only be placed as the last option (Option 4)`);
+        return;
+      }
+    }
+
     const newQuestion: Question = {
       id: Date.now().toString(),
       question: questionForm.question!,

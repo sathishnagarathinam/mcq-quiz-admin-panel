@@ -86,7 +86,7 @@
 
 ### **One-Line Build Command**
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release
@@ -109,7 +109,7 @@ mobile_app/build/app/outputs/bundle/release/app-release.aab
 
 ### **Step 1: Build**
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release
@@ -300,7 +300,7 @@ Version 1.7.33 (Build 41)
 
 **Build Command**:
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release

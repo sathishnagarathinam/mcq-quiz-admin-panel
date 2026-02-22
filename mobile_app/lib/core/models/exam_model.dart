@@ -132,6 +132,7 @@ class QuestionModel {
   final int correctAnswer;
   final String? explanation;
   final String difficulty; // Easy, Medium, Hard
+  final bool isFree; // Whether this question is free in freemium model
 
   const QuestionModel({
     required this.id,
@@ -140,6 +141,7 @@ class QuestionModel {
     required this.correctAnswer,
     this.explanation,
     this.difficulty = 'Medium', // Default to Medium
+    this.isFree = false, // Default to paid (not free)
   });
 
   factory QuestionModel.fromJson(Map<String, dynamic> json) {
@@ -150,6 +152,7 @@ class QuestionModel {
       correctAnswer: json['correctAnswer'] ?? 0,
       explanation: json['explanation'],
       difficulty: json['difficulty'] ?? 'Medium',
+      isFree: json['isFree'] ?? false,
     );
   }
 
@@ -161,6 +164,7 @@ class QuestionModel {
       'correctAnswer': correctAnswer,
       'explanation': explanation,
       'difficulty': difficulty,
+      'isFree': isFree,
     };
   }
 }
@@ -188,6 +192,10 @@ class ExamModel {
   final double discountPercentage; // Discount percentage (0-100)
   final String? bannerRoutedFrom; // Banner ID if routed from banner
   final String? couponCode; // Coupon code applied
+  final int
+      freeQuestionsLimit; // Number of free questions in freemium model (-1 = fully free, 0 = fully paid, >0 = freemium)
+  final double
+      unlockPrice; // Price to unlock remaining questions in freemium model
 
   const ExamModel({
     required this.id,
@@ -212,7 +220,19 @@ class ExamModel {
     this.discountPercentage = 0.0,
     this.bannerRoutedFrom,
     this.couponCode,
+    this.freeQuestionsLimit = -1, // Default to fully free
+    this.unlockPrice = 0.0,
   });
+
+  /// Check if this is a freemium quiz (has some free questions but not all)
+  bool get isFreemium =>
+      freeQuestionsLimit > 0 && freeQuestionsLimit < numberOfQuestions;
+
+  /// Get count of free questions (based on isFree flag in questions)
+  int get freeQuestionCount => questions.where((q) => q.isFree).length;
+
+  /// Get count of paid questions
+  int get paidQuestionCount => questions.where((q) => !q.isFree).length;
 
   factory ExamModel.fromJson(Map<String, dynamic> json) {
     final questionsData = json['questions'] as List<dynamic>? ?? [];
@@ -247,6 +267,8 @@ class ExamModel {
       lastSharedAt: json['lastSharedAt'] != null
           ? DateTime.parse(json['lastSharedAt'])
           : null,
+      freeQuestionsLimit: json['freeQuestionsLimit'] ?? -1,
+      unlockPrice: (json['unlockPrice'] ?? 0.0).toDouble(),
     );
   }
 
@@ -334,6 +356,8 @@ class ExamModel {
         discountPercentage: (data['discountPercentage'] ?? 0.0).toDouble(),
         bannerRoutedFrom: data['bannerRoutedFrom'],
         couponCode: data['couponCode'],
+        freeQuestionsLimit: data['freeQuestionsLimit'] ?? -1,
+        unlockPrice: (data['unlockPrice'] ?? 0.0).toDouble(),
       );
     } catch (e) {
       developer.log('Error parsing exam document ${doc.id}: $e');
@@ -382,6 +406,8 @@ class ExamModel {
       'discountPercentage': discountPercentage,
       'bannerRoutedFrom': bannerRoutedFrom,
       'couponCode': couponCode,
+      'freeQuestionsLimit': freeQuestionsLimit,
+      'unlockPrice': unlockPrice,
     };
   }
 
@@ -410,6 +436,8 @@ class ExamModel {
       'discountPercentage': discountPercentage,
       'bannerRoutedFrom': bannerRoutedFrom,
       'couponCode': couponCode,
+      'freeQuestionsLimit': freeQuestionsLimit,
+      'unlockPrice': unlockPrice,
     };
   }
 }

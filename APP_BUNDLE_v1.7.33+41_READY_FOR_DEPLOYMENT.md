@@ -10,7 +10,7 @@
 
 ### **File Details**
 - **Filename**: `DakshinPostalAcademy_v1.7.33+41_GooglePlay_Release_DeleteUserFix_20260116_121218.aab`
-- **Location**: `/Volumes/sathish/mcq/mobile_app/`
+- **Location**: `/Volumes/work/mcq/mobile_app/`
 - **Size**: 65 MB
 - **Format**: Android App Bundle (AAB)
 - **Build Time**: 199 seconds

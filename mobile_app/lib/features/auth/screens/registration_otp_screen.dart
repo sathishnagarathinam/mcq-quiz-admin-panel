@@ -8,6 +8,7 @@ import 'dart:async';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/providers/auth_provider_minimal.dart';
+import '../../../core/providers/email_auth_provider.dart';
 import '../../../shared/widgets/loading_button.dart';
 import '../../../shared/widgets/custom_snackbar.dart';
 import '../widgets/animated_background.dart';
@@ -540,18 +541,24 @@ class _RegistrationOtpScreenState extends ConsumerState<RegistrationOtpScreen>
       'email': widget.email,
       'officeName': widget.officeName,
       'designation': widget.designation,
+      'phoneNumber': widget.phoneNumber,
     };
     final success = await ref
         .read(authProvider.notifier)
         .verifyRegistrationOTP(otp, userData);
 
     if (success && mounted) {
+      // Reload phone user data so the user's name is available in the app
+      await ref.read(emailAuthProvider.notifier).reloadPhoneUserData();
+
+      if (!mounted) return;
+
       // Show success message
       CustomSnackbar.showSuccess(
           context, 'Registration completed successfully! Welcome to MCQ Quiz!');
 
-      // Navigate to login screen
-      context.go('/auth/login');
+      // Navigate to home screen (user is now authenticated)
+      context.go('/home');
     } else if (mounted) {
       // Show error message if available
       final authState = ref.read(authProvider);

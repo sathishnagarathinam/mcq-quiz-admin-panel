@@ -103,13 +103,15 @@ const FreeQuizAccessManagement: React.FC = () => {
 
   const fetchUsers = async () => {
     try {
-      const snapshot = await getDocs(collection(db, 'users'));
+      // Fetch from mobile_users collection (where actual app users are stored)
+      const snapshot = await getDocs(collection(db, 'mobile_users'));
       const data = snapshot.docs.map(doc => ({
-        id: doc.id,
+        id: doc.id, // Document ID is the actual user ID (phone number or Firebase UID)
         name: doc.data().name || doc.data().displayName || 'Unknown',
         email: doc.data().email || '',
       }));
       setUsers(data);
+      console.log(`Loaded ${data.length} mobile users`);
     } catch (error) {
       console.error('Error fetching users:', error);
     }

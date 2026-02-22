@@ -1,8 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/quiz_attempt_model.dart';
 import '../models/exam_model.dart';
 import 'analytics_service.dart';
+
+// Key for storing authenticated phone number
+const String _authPhoneKey = 'authenticated_phone_number';
 
 /// Service for managing quiz attempts
 class QuizAttemptService {
@@ -10,8 +14,46 @@ class QuizAttemptService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final AnalyticsService _analyticsService = AnalyticsService();
 
-  /// Get current user ID
-  String? get currentUserId => _auth.currentUser?.uid;
+  // Cached user ID for phone auth users
+  String? _cachedUserId;
+
+  /// Get current user ID (supports both Firebase Auth and phone auth)
+  String? get currentUserId {
+    // Check Firebase Auth first
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser != null) {
+      return firebaseUser.uid;
+    }
+    // Return cached user ID for phone auth users
+    return _cachedUserId;
+  }
+
+  /// Set current user ID (call this when user logs in via phone auth)
+  Future<void> setCurrentUserId() async {
+    // Check Firebase Auth first
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser != null) {
+      _cachedUserId = firebaseUser.uid;
+      return;
+    }
+
+    // Check phone auth via SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedPhone = prefs.getString(_authPhoneKey);
+      if (savedPhone != null && savedPhone.isNotEmpty) {
+        // Return phone number without + as user ID (matches Firestore document ID)
+        _cachedUserId = savedPhone.replaceAll('+', '');
+      }
+    } catch (e) {
+      print('Error getting phone user ID: $e');
+    }
+  }
+
+  /// Clear cached user ID (call this on sign out)
+  void clearCachedUserId() {
+    _cachedUserId = null;
+  }
 
   /// Start a new quiz attempt
   Future<String> startQuizAttempt(ExamModel exam) async {
@@ -53,6 +95,8 @@ class QuizAttemptService {
     required int correctAnswers,
     required int timeSpent,
     Map<String, dynamic>? answers,
+    int?
+        totalQuestions, // Optional override for total questions (e.g., for freemium quizzes)
   }) async {
     try {
       print('🔄 Completing quiz attempt: $attemptId');
@@ -65,11 +109,13 @@ class QuizAttemptService {
       }
 
       final attemptData = attemptDoc.data() as Map<String, dynamic>;
-      final totalQuestions = attemptData['totalQuestions'] as int? ?? 1;
-      final scorePercentage = (score / totalQuestions * 100).round();
+      // Use provided totalQuestions or fall back to stored value
+      final finalTotalQuestions =
+          totalQuestions ?? (attemptData['totalQuestions'] as int? ?? 1);
+      final scorePercentage = (score / finalTotalQuestions * 100).round();
 
       // Update the quiz attempt document with all necessary fields
-      await _firestore.collection('quiz_attempts').doc(attemptId).update({
+      final updateData = {
         'completedAt': FieldValue.serverTimestamp(),
         'score': score,
         'correctAnswers': correctAnswers,
@@ -80,7 +126,17 @@ class QuizAttemptService {
         'scorePercentage':
             scorePercentage, // Add percentage for web app compatibility
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
+
+      // If totalQuestions was overridden (e.g., for freemium quizzes), update it
+      if (totalQuestions != null) {
+        updateData['totalQuestions'] = totalQuestions;
+      }
+
+      await _firestore
+          .collection('quiz_attempts')
+          .doc(attemptId)
+          .update(updateData);
 
       print('✅ Quiz attempt updated in Firestore');
 
@@ -113,11 +169,11 @@ class QuizAttemptService {
     }
   }
 
-  /// Get user's recent quiz attempts
+  /// Get user's recent quiz attempts (async version that supports phone auth)
   Stream<List<QuizAttemptModel>> getUserRecentAttempts({int limit = 10}) {
-    // Get current user ID
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) {
+    // Use the currentUserId getter which supports both Firebase Auth and phone auth
+    final userId = currentUserId;
+    if (userId == null) {
       return Stream.value(<QuizAttemptModel>[]);
     }
 
@@ -127,7 +183,7 @@ class QuizAttemptService {
     // Return a stream that listens to Firestore changes
     return _firestore
         .collection('quiz_attempts')
-        .where('userId', isEqualTo: currentUser.uid)
+        .where('userId', isEqualTo: userId)
         .orderBy('attemptedAt', descending: true)
         .limit(limit)
         .snapshots()

@@ -69,7 +69,7 @@
 
 ### **Quick Build**
 ```bash
-cd /Volumes/sathish/mcq/mobile_app
+cd /Volumes/work/mcq/mobile_app
 flutter clean
 flutter pub get
 flutter build appbundle --release
@@ -318,7 +318,7 @@ Refer to:
 
 **Build Command**:
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release

@@ -11,7 +11,7 @@
 
 ### **File Details**
 - **Filename**: `DakshinPostalAcademy_v1.7.33+41_GooglePlay_Release_16KB_Support_20260116_123008.aab`
-- **Location**: `/Volumes/sathish/mcq/mobile_app/`
+- **Location**: `/Volumes/work/mcq/mobile_app/`
 - **Size**: 67.8 MB
 - **Format**: Android App Bundle (AAB)
 - **Status**: ✅ **READY FOR GOOGLE PLAY STORE**
@@ -182,7 +182,7 @@ Message: Build: Rebuild app bundle v1.7.33+41 with proper 16KB page size support
 
 ## 📁 File Location
 
-**Primary File**: `/Volumes/sathish/mcq/mobile_app/DakshinPostalAcademy_v1.7.33+41_GooglePlay_Release_16KB_Support_20260116_123008.aab`
+**Primary File**: `/Volumes/work/mcq/mobile_app/DakshinPostalAcademy_v1.7.33+41_GooglePlay_Release_16KB_Support_20260116_123008.aab`
 
 **Backup Location**: `/Volumes/sathish/mcq/mobile_app/build/app/outputs/bundle/release/app-release.aab`
 

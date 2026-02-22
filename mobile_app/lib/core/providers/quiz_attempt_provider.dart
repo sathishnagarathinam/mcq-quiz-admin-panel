@@ -7,11 +7,16 @@ final quizAttemptServiceProvider = Provider<QuizAttemptService>((ref) {
   return QuizAttemptService();
 });
 
-/// Provider for user's recent quiz attempts
+/// Provider for user's recent quiz attempts (supports phone auth)
 final userRecentAttemptsProvider =
-    StreamProvider.family<List<QuizAttemptModel>, int>((ref, limit) {
+    StreamProvider.family<List<QuizAttemptModel>, int>((ref, limit) async* {
   final service = ref.read(quizAttemptServiceProvider);
-  return service.getUserRecentAttempts(limit: limit);
+
+  // Set current user ID (supports both Firebase Auth and phone auth)
+  await service.setCurrentUserId();
+
+  // Yield from the stream
+  yield* service.getUserRecentAttempts(limit: limit);
 });
 
 /// Provider for user's attempts for a specific exam
@@ -100,6 +105,8 @@ class CurrentQuizAttemptNotifier extends StateNotifier<QuizAttemptModel?> {
     required int correctAnswers,
     required int timeSpent,
     Map<String, dynamic>? answers,
+    int?
+        totalQuestions, // Optional override for total questions (e.g., for freemium quizzes)
   }) async {
     if (state == null) return;
 
@@ -110,6 +117,7 @@ class CurrentQuizAttemptNotifier extends StateNotifier<QuizAttemptModel?> {
         correctAnswers: correctAnswers,
         timeSpent: timeSpent,
         answers: answers,
+        totalQuestions: totalQuestions,
       );
 
       // Update the state
@@ -121,6 +129,7 @@ class CurrentQuizAttemptNotifier extends StateNotifier<QuizAttemptModel?> {
         isCompleted: true,
         status: 'completed',
         answers: answers,
+        totalQuestions: totalQuestions ?? state!.totalQuestions,
       );
     } catch (e) {
       print('Error completing attempt: $e');

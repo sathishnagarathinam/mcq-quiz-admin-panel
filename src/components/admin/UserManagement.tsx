@@ -228,6 +228,8 @@ const UserManagement: React.FC = () => {
         return <AdminPanelSettings />;
       case 'admin':
         return <Person />;
+      case 'user':
+        return <Person />;
       default:
         return <Person />;
     }
@@ -241,6 +243,8 @@ const UserManagement: React.FC = () => {
         return 'warning';
       case 'admin':
         return 'primary';
+      case 'user':
+        return 'info';
       default:
         return 'default';
     }
@@ -453,6 +457,7 @@ const UserManagement: React.FC = () => {
                 }
                 sx={{ mb: 2 }}
               >
+                <MenuItem value="user">User</MenuItem>
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="super_admin">Super Admin</MenuItem>
                 <MenuItem value="system_admin">System Admin</MenuItem>

@@ -10,7 +10,7 @@
 
 ### **Copy & Paste Command**
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release
@@ -27,7 +27,7 @@ flutter build appbundle --release
 
 ### **Step 1: Navigate to Project**
 ```bash
-cd /Volumes/sathish/mcq/mobile_app
+cd /Volumes/work/mcq/mobile_app
 ```
 
 ### **Step 2: Clean Previous Build**
@@ -246,7 +246,7 @@ flutter build appbundle --release
 
 **Build Command**:
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release

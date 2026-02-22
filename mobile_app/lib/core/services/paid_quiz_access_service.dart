@@ -1,20 +1,24 @@
 import 'dart:developer' as developer;
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/paid_quiz_access_model.dart';
 import '../models/exam_model.dart';
+import 'auth_helper_service.dart';
 
 /// Service for managing paid quiz access with 30-day expiry
 class PaidQuizAccessService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  static final FirebaseAuth _auth = FirebaseAuth.instance;
 
   static const String _accessCollection = 'paid_quiz_access';
   static const String _userAccessCollection =
       'exam_access'; // Matches backend collection name
   static const String _freeAccessCollection =
       'free_quiz_access'; // Admin-granted free access collection
+
+  /// Get current user ID (supports both Firebase Auth and phone auth)
+  static Future<String?> _getCurrentUserId() async {
+    return await AuthHelperService.getCurrentUserId();
+  }
 
   /// Create access record after successful payment
   static Future<PaidQuizAccessModel?> createAccessRecord({
@@ -23,13 +27,13 @@ class PaidQuizAccessService {
     required String paymentId,
   }) async {
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
+      final userId = await _getCurrentUserId();
+      if (userId == null) {
         throw Exception('User not authenticated');
       }
 
       final accessRecord = PaidQuizAccessModel.fromPayment(
-        userId: currentUser.uid,
+        userId: userId,
         examId: examId,
         examName: examName,
         paymentId: paymentId,
@@ -43,7 +47,7 @@ class PaidQuizAccessService {
       // Also save to user's subcollection for faster queries
       await _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(userId)
           .collection(_userAccessCollection)
           .doc(examId)
           .set(accessRecord.toFirestore());
@@ -64,39 +68,41 @@ class PaidQuizAccessService {
   }) async {
     try {
       developer.log('🔍 getQuizAccessStatus called for exam: $examId');
-      developer.log('   - exam.name: ${exam.name}');
       developer.log('   - exam.isFree: ${exam.isFree}');
-      developer.log('   - exam.price: ${exam.price}');
+      developer.log('   - exam.isFreemium: ${exam.isFreemium}');
 
-      // If quiz is free, return free status
-      if (exam.isFree) {
-        developer
-            .log('✅ Quiz is FREE (globally) - returning QuizAccessStatus.free');
+      // If quiz is free AND not freemium, return free status immediately
+      // Freemium quizzes have isFree=true but still need paid access for premium questions
+      if (exam.isFree && !exam.isFreemium) {
+        developer.log(
+            '✅ Quiz is FREE (globally, not freemium) - returning QuizAccessStatus.free');
         return QuizAccessStatus.free;
       }
 
-      developer.log('💰 Quiz is PAID - checking access records...');
+      developer.log('💰 Quiz is PAID or FREEMIUM - checking access records...');
 
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
+      final userId = await _getCurrentUserId();
+      if (userId == null) {
         developer.log('❌ No current user - returning notPurchased');
         return QuizAccessStatus.notPurchased;
       }
 
-      // First, check for admin-granted free access
-      final hasFreeAccess = await _checkAdminGrantedFreeAccess(
-        userId: currentUser.uid,
-        examId: examId,
-      );
+      developer.log('   - userId: $userId');
+
+      // Run both checks in parallel for better performance
+      final results = await Future.wait([
+        _checkAdminGrantedFreeAccess(userId: userId, examId: examId),
+        _getUserQuizAccessInternal(userId, examId),
+      ]);
+
+      final hasFreeAccess = results[0] as bool;
+      final accessRecord = results[1] as PaidQuizAccessModel?;
 
       if (hasFreeAccess) {
         developer.log(
             '✅ Admin-granted FREE access found - returning QuizAccessStatus.free');
         return QuizAccessStatus.free;
       }
-
-      // Check user's paid access record
-      final accessRecord = await getUserQuizAccess(examId);
 
       if (accessRecord == null) {
         developer.log('❌ No access record found - returning notPurchased');
@@ -114,6 +120,32 @@ class PaidQuizAccessService {
     } catch (e) {
       developer.log('❌ Error getting quiz access status: $e');
       return QuizAccessStatus.notPurchased;
+    }
+  }
+
+  /// Internal method to get user quiz access without calling _getCurrentUserId again
+  static Future<PaidQuizAccessModel?> _getUserQuizAccessInternal(
+      String userId, String examId) async {
+    try {
+      developer.log('🔍 Checking exam access for user: $userId, exam: $examId');
+
+      final doc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection(_userAccessCollection)
+          .doc(examId)
+          .get();
+
+      if (doc.exists) {
+        developer.log('✅ Access record found!');
+        return PaidQuizAccessModel.fromFirestore(doc);
+      }
+
+      developer.log('❌ No access record found for exam: $examId');
+      return null;
+    } catch (e) {
+      developer.log('❌ Error getting user quiz access: $e');
+      return null;
     }
   }
 
@@ -171,20 +203,19 @@ class PaidQuizAccessService {
   /// Get user's access record for a specific exam
   static Future<PaidQuizAccessModel?> getUserQuizAccess(String examId) async {
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
+      final userId = await _getCurrentUserId();
+      if (userId == null) {
         developer.log('❌ No current user for quiz access check');
         return null;
       }
 
+      developer.log('🔍 Checking exam access for user: $userId, exam: $examId');
       developer.log(
-          '🔍 Checking exam access for user: ${currentUser.uid}, exam: $examId');
-      developer.log(
-          '   Looking in collection: users/${currentUser.uid}/$_userAccessCollection/$examId');
+          '   Looking in collection: users/$userId/$_userAccessCollection/$examId');
 
       final doc = await _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(userId)
           .collection(_userAccessCollection)
           .doc(examId)
           .get();
@@ -208,19 +239,18 @@ class PaidQuizAccessService {
   /// Get all user's quiz access records
   static Future<List<PaidQuizAccessModel>> getUserAllQuizAccess() async {
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
+      final userId = await _getCurrentUserId();
+      if (userId == null) {
         developer.log('❌ No current user for getting all quiz access');
         return [];
       }
 
-      developer.log('🔍 Getting all quiz access for user: ${currentUser.uid}');
-      developer.log(
-          '   Collection path: users/${currentUser.uid}/$_userAccessCollection');
+      developer.log('🔍 Getting all quiz access for user: $userId');
+      developer.log('   Collection path: users/$userId/$_userAccessCollection');
 
       final querySnapshot = await _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(userId)
           .collection(_userAccessCollection)
           .get(); // Removed orderBy to avoid index requirement
 
@@ -246,12 +276,12 @@ class PaidQuizAccessService {
   /// Update attempt count when user starts a quiz
   static Future<void> recordQuizAttempt(String examId) async {
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) return;
+      final userId = await _getCurrentUserId();
+      if (userId == null) return;
 
       final docRef = _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(userId)
           .collection(_userAccessCollection)
           .doc(examId);
 
@@ -275,40 +305,76 @@ class PaidQuizAccessService {
     return status.canAttempt;
   }
 
-  /// Get access details for instruction screen
+  /// Get access details for instruction screen (optimized - single Firestore call)
   static Future<Map<String, dynamic>> getAccessDetails({
     required String examId,
     required ExamModel exam,
   }) async {
     try {
-      final status = await getQuizAccessStatus(examId: examId, exam: exam);
+      developer.log('🔍 getAccessDetails called for exam: $examId');
 
-      if (status == QuizAccessStatus.free) {
+      // If quiz is free AND not freemium, return immediately without any Firestore calls
+      // Freemium quizzes have isFree=true but still need paid access for premium questions
+      if (exam.isFree && !exam.isFreemium) {
+        developer.log('✅ Quiz is FREE (not freemium) - returning immediately');
         return {
-          'status': status,
+          'status': QuizAccessStatus.free,
           'canAttempt': true,
           'message': 'This quiz is free to attempt',
           'showPayment': false,
         };
       }
 
-      if (status == QuizAccessStatus.purchased) {
-        final accessRecord = await getUserQuizAccess(examId);
-        if (accessRecord != null) {
-          return {
-            'status': status,
-            'canAttempt': true,
-            'message': 'Access expires in ${accessRecord.remainingDays} days',
-            'showPayment': false,
-            'remainingDays': accessRecord.remainingDays,
-            'expiryDate': accessRecord.expiryDate,
-            'attemptCount': accessRecord.attemptCount,
-            'isExpiringSoon': accessRecord.isExpiringSoon,
-          };
-        }
+      final userId = await _getCurrentUserId();
+      if (userId == null) {
+        developer.log('❌ No current user - returning notPurchased');
+        return {
+          'status': QuizAccessStatus.notPurchased,
+          'canAttempt': false,
+          'message': 'Purchase this quiz for 30 days unlimited access',
+          'showPayment': true,
+          'price': exam.price,
+          'currency': exam.currency,
+        };
+      }
+
+      // Run both checks in parallel for better performance
+      final results = await Future.wait([
+        _checkAdminGrantedFreeAccess(userId: userId, examId: examId),
+        _getUserQuizAccessInternal(userId, examId),
+      ]);
+
+      final hasFreeAccess = results[0] as bool;
+      final accessRecord = results[1] as PaidQuizAccessModel?;
+
+      if (hasFreeAccess) {
+        developer.log('✅ Admin-granted FREE access found');
+        return {
+          'status': QuizAccessStatus.free,
+          'canAttempt': true,
+          'message': 'This quiz is free to attempt',
+          'showPayment': false,
+        };
+      }
+
+      if (accessRecord != null && accessRecord.isValidAccess) {
+        developer.log('✅ Valid paid access record found');
+        return {
+          'status': QuizAccessStatus.purchased,
+          'canAttempt': true,
+          'message': 'Access expires in ${accessRecord.remainingDays} days',
+          'showPayment': false,
+          'remainingDays': accessRecord.remainingDays,
+          'expiryDate': accessRecord.expiryDate,
+          'attemptCount': accessRecord.attemptCount,
+          'isExpiringSoon': accessRecord.isExpiringSoon,
+        };
       }
 
       // Not purchased or expired
+      final status = accessRecord != null
+          ? QuizAccessStatus.expired
+          : QuizAccessStatus.notPurchased;
       return {
         'status': status,
         'canAttempt': false,
@@ -333,13 +399,13 @@ class PaidQuizAccessService {
   /// Clean up expired access records (can be called periodically)
   static Future<void> cleanupExpiredAccess() async {
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) return;
+      final userId = await _getCurrentUserId();
+      if (userId == null) return;
 
       final now = DateTime.now();
       final querySnapshot = await _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(userId)
           .collection(_userAccessCollection)
           .where('expiryDate', isLessThan: Timestamp.fromDate(now))
           .where('isActive', isEqualTo: true)
@@ -363,15 +429,15 @@ class PaidQuizAccessService {
   /// Get expiring access records (for notifications)
   static Future<List<PaidQuizAccessModel>> getExpiringSoonAccess() async {
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) return [];
+      final userId = await _getCurrentUserId();
+      if (userId == null) return [];
 
       final now = DateTime.now();
       final threeDaysFromNow = now.add(const Duration(days: 3));
 
       final querySnapshot = await _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(userId)
           .collection(_userAccessCollection)
           .where('isActive', isEqualTo: true)
           .where('expiryDate', isGreaterThan: Timestamp.fromDate(now))

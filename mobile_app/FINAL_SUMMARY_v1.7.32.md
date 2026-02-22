@@ -11,7 +11,7 @@
 
 ### **App Bundle**
 ```
-Location: /Volumes/sathish/mcq/mobile_app/
+Location: /Volumes/work/mcq/mobile_app/
 File: DakshinPostalAcademy_v1.7.32+40_NotificationFix_16KB.aab
 Size: 67.8 MB
 Status: ✅ Ready for Google Play Store

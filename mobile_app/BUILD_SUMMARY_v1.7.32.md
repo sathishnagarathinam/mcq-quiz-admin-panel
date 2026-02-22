@@ -11,7 +11,7 @@
 
 **App Bundle Location**:
 ```
-/Volumes/sathish/mcq/mobile_app/DakshinPostalAcademy_v1.7.32+40_NotificationFix_16KB.aab
+/Volumes/work/mcq/mobile_app/DakshinPostalAcademy_v1.7.32+40_NotificationFix_16KB.aab
 ```
 
 **Build Details**:

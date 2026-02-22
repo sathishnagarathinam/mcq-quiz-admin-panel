@@ -2,10 +2,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/firebase_email_auth_service.dart';
 import '../services/device_auth_service.dart';
 import '../services/credential_storage_service.dart';
 import '../services/demo_account_service.dart';
+
+// Key for storing authenticated phone number (same as in auth_provider_minimal.dart)
+const String _authPhoneKey = 'authenticated_phone_number';
 
 /// User model for email authentication
 class EmailUser {
@@ -202,6 +206,100 @@ class EmailAuthNotifier extends StateNotifier<EmailAuthState> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _loadUserData(user);
+    } else {
+      // No Firebase Auth user, check for phone-authenticated user
+      _checkPhoneAuthUser();
+    }
+  }
+
+  /// Check for phone-authenticated user from SharedPreferences
+  Future<void> _checkPhoneAuthUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedPhone = prefs.getString(_authPhoneKey);
+
+      if (kDebugMode) {
+        print('DEBUG: 📱 Checking for phone-authenticated user: $savedPhone');
+      }
+
+      if (savedPhone != null && savedPhone.isNotEmpty) {
+        // Load user data from mobile_users collection
+        await _loadPhoneUserData(savedPhone);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: ❌ Error checking phone auth user: $e');
+      }
+    }
+  }
+
+  /// Load user data for phone-authenticated user from Firestore
+  Future<void> _loadPhoneUserData(String phoneNumber) async {
+    try {
+      if (kDebugMode) {
+        print('DEBUG: 📱 Loading phone user data for: $phoneNumber');
+      }
+
+      // Query mobile_users collection by phone number
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('mobile_users')
+          .where('phoneNumber', isEqualTo: phoneNumber)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        final userData = querySnapshot.docs.first.data();
+        final docId = querySnapshot.docs.first.id;
+
+        // Verify device binding
+        final storedDeviceId = userData['deviceId'] as String?;
+        final currentDeviceId = await DeviceAuthService.getDeviceId();
+
+        if (storedDeviceId != currentDeviceId) {
+          if (kDebugMode) {
+            print('DEBUG: ❌ Device mismatch for phone user, clearing auth');
+          }
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_authPhoneKey);
+          return;
+        }
+
+        // Create EmailUser from phone user data
+        final emailUser = EmailUser(
+          uid: docId,
+          email: userData['email'] ?? '',
+          name: userData['name'] ?? '',
+          phoneNumber: userData['phoneNumber'] ?? phoneNumber,
+          officeName: userData['officeName'] ?? '',
+          designation: userData['designation'] ?? '',
+          emailVerified: true, // Phone verified users are considered verified
+          createdAt: userData['createdAt']?.toDate(),
+          lastLoginAt: userData['lastLoginAt']?.toDate(),
+          registeredDeviceId: storedDeviceId,
+          isDeviceBound: true,
+        );
+
+        state = state.copyWith(
+          user: emailUser,
+          isAuthenticated: true,
+          error: null,
+        );
+
+        if (kDebugMode) {
+          print('DEBUG: ✅ Phone user data loaded: ${emailUser.name}');
+        }
+      } else {
+        if (kDebugMode) {
+          print('DEBUG: ❌ Phone user not found in Firestore');
+        }
+        // Clear invalid phone auth
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_authPhoneKey);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: ❌ Error loading phone user data: $e');
+      }
     }
   }
 
@@ -211,13 +309,25 @@ class EmailAuthNotifier extends StateNotifier<EmailAuthState> {
       if (user != null) {
         await _loadUserData(user);
       } else {
-        // User signed out, clear state
-        state = const EmailAuthState();
-        if (kDebugMode) {
-          print('DEBUG: 🔄 Auth state changed: User signed out');
+        // User signed out from Firebase, check for phone-authenticated user
+        await _checkPhoneAuthUser();
+        if (!state.isAuthenticated) {
+          // No phone auth either, clear state
+          state = const EmailAuthState();
+          if (kDebugMode) {
+            print('DEBUG: 🔄 Auth state changed: User signed out');
+          }
         }
       }
     });
+  }
+
+  /// Public method to reload phone user data (call after registration)
+  Future<void> reloadPhoneUserData() async {
+    if (kDebugMode) {
+      print('DEBUG: 🔄 Reloading phone user data...');
+    }
+    await _checkPhoneAuthUser();
   }
 
   /// Load user data from Firestore
@@ -759,6 +869,19 @@ class EmailAuthNotifier extends StateNotifier<EmailAuthState> {
 
       // Clear stored credentials on sign out
       await CredentialStorageService.clearStoredCredentials();
+
+      // Clear phone auth from SharedPreferences
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_authPhoneKey);
+        if (kDebugMode) {
+          print('DEBUG: ✅ Phone auth cleared from SharedPreferences');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('DEBUG: ⚠️ Error clearing phone auth: $e');
+        }
+      }
 
       state = const EmailAuthState();
       if (kDebugMode) {

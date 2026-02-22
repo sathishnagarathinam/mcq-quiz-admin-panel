@@ -117,6 +117,8 @@ class AnalyticsService {
       final analyticsRef =
           _firestore.collection('user_analytics').doc(attempt.userId);
 
+      UserAnalyticsModel? updatedAnalytics;
+
       await _firestore.runTransaction((transaction) async {
         final doc = await transaction.get(analyticsRef);
 
@@ -143,7 +145,7 @@ class AnalyticsService {
         print(
             '🎯 Average score: ${updatedStatistics.averageScore.toStringAsFixed(1)}%');
 
-        final updatedAnalytics = analytics.copyWith(
+        final newAnalytics = analytics.copyWith(
           statistics: updatedStatistics,
           performance: updatedPerformance,
           activity: updatedActivity,
@@ -151,12 +153,16 @@ class AnalyticsService {
           lastUpdated: DateTime.now(),
         );
 
-        transaction.set(analyticsRef, updatedAnalytics.toFirestore());
+        transaction.set(analyticsRef, newAnalytics.toFirestore());
         print('✅ Analytics saved to Firestore');
 
-        // Update user document with latest statistics for admin panel
-        await _updateUserDocumentStats(attempt.userId, updatedAnalytics);
+        updatedAnalytics = newAnalytics;
       });
+
+      // Update user document with latest statistics for admin panel (outside transaction)
+      if (updatedAnalytics != null) {
+        await _updateUserDocumentStats(attempt.userId, updatedAnalytics!);
+      }
 
       // Update platform analytics
       await _updatePlatformAnalytics(attempt);

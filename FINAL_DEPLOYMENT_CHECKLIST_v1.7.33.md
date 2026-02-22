@@ -43,7 +43,7 @@
 - [ ] Previous build cleaned
 
 ### **Build Process**
-- [ ] Navigate to: `/Volumes/sathish/mcq/mobile_app`
+- [ ] Navigate to: `/Volumes/work/mcq/mobile_app`
 - [ ] Run: `flutter clean`
 - [ ] Run: `flutter pub get`
 - [ ] Run: `flutter build appbundle --release`
@@ -292,7 +292,7 @@
 ## 🎯 Build Command
 
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release

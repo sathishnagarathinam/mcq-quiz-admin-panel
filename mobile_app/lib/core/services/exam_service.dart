@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/exam_model.dart';
 import '../models/live_test_model.dart';
+import 'auth_helper_service.dart';
 import 'dart:developer' as developer;
 
 class ExamService {
@@ -17,9 +18,12 @@ class ExamService {
       final currentUser = _auth.currentUser;
       developer.log('Current user: ${currentUser?.uid ?? 'null'}');
       developer.log('User email: ${currentUser?.email ?? 'null'}');
-      developer.log('User authenticated: ${currentUser != null}');
 
-      if (currentUser == null) {
+      // Check for both Firebase Auth and phone auth
+      final isAuthenticated = await AuthHelperService.isUserAuthenticated();
+      developer.log('User authenticated: $isAuthenticated');
+
+      if (!isAuthenticated) {
         throw Exception('User not authenticated. Please log in first.');
       }
 

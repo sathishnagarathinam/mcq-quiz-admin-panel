@@ -7,12 +7,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+// Supabase removed - using Firebase Phone Auth only
+// import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart' as provider;
 
 import 'core/config/app_config.dart';
 import 'core/config/firebase_options.dart';
-import 'core/config/supabase_config.dart';
+// Supabase config removed - using Firebase Phone Auth only
+// import 'core/config/supabase_config.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'core/providers/theme_provider.dart';
@@ -156,18 +158,9 @@ void main() async {
     // Start session validation monitoring
     _startSessionValidationMonitoring();
 
-    // Initialize Supabase
-    try {
-      await Supabase.initialize(
-        url: SupabaseConfig.supabaseUrl,
-        anonKey: SupabaseConfig.supabaseAnonKey,
-        debug: AppConfig.isDebugMode,
-      );
-      debugPrint('Supabase initialized successfully');
-    } catch (supabaseError) {
-      debugPrint('Supabase initialization error: $supabaseError');
-      // Continue without Supabase for now - will show error in UI
-    }
+    // Supabase removed - using Firebase Phone Auth + Razorpay only
+    // No Supabase initialization needed
+    debugPrint('Using Firebase Phone Auth + Razorpay (no Supabase)');
 
     // Set preferred orientations
     await SystemChrome.setPreferredOrientations([

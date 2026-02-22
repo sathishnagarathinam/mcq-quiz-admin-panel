@@ -7,7 +7,7 @@
 **Build Time:** ~175 seconds  
 **Bundle File:** `DakshinPostalAcademy_v1.7.31+39_GooglePlay_Release_16KB_20260114_080618.aab`  
 **Bundle Size:** 65 MB  
-**Location:** `/Volumes/sathish/mcq/mobile_app/`  
+**Location:** `/Volumes/work/mcq/mobile_app/`
 
 ## 📦 What's Included
 

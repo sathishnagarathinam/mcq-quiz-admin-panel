@@ -3,7 +3,7 @@
 ## 📦 Bundle Information
 
 **File:** `DakshinPostalAcademy_v1.7.31+39_ScreenshotPrevention_Enabled_20260114_171718.aab`  
-**Location:** `/Volumes/sathish/mcq/mobile_app/`  
+**Location:** `/Volumes/work/mcq/mobile_app/`
 **Size:** 65 MB  
 **Version:** 1.7.31+39  
 **Status:** ✅ **READY FOR GOOGLE PLAY**
@@ -33,11 +33,11 @@
 
 ```bash
 # Mobile app functions
-cd /Volumes/sathish/mcq/mobile_app/firebase/functions
+cd /Volumes/work/mcq/mobile_app/firebase/functions
 npm run deploy
 
 # Web admin functions
-cd /Volumes/sathish/mcq/web_admin/firebase/functions
+cd /Volumes/work/mcq/web_admin/firebase/functions
 npm run deploy
 ```
 

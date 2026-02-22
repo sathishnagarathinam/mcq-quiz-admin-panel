@@ -82,6 +82,16 @@ interface ExamType {
   createdAt: Date;
 }
 
+interface SuitabilityOption {
+  id: string;
+  name: string;
+  shortName: string;
+  color: string;
+  isDefault: boolean;
+  order: number;
+  createdAt: Date;
+}
+
 interface Exam {
   id?: string;
   name: string;
@@ -101,6 +111,7 @@ interface Exam {
   isFree?: boolean;
   freeQuestionsLimit?: number; // Number of free questions (0 = fully paid, -1 = fully free, >0 = freemium)
   unlockPrice?: number; // Price to unlock remaining questions in freemium model
+  topic?: string; // Topic/subject of the exam
   // Live test scheduling fields
   isLiveTest?: boolean;
   liveTestDescription?: string;
@@ -117,7 +128,14 @@ interface Exam {
   liveTestResultReleaseTime?: Date;
 }
 
-const examSuitabilityOptions = ['MTS', 'Postman', 'PA', 'IP', 'Group B'];
+// Default suitability options
+const defaultSuitabilityOptions: SuitabilityOption[] = [
+  { id: 'mts', name: 'Multi Tasking Staff', shortName: 'MTS', color: '#1976d2', isDefault: true, order: 1, createdAt: new Date() },
+  { id: 'postman', name: 'Postman', shortName: 'Postman', color: '#388e3c', isDefault: true, order: 2, createdAt: new Date() },
+  { id: 'pa', name: 'Postal Assistant', shortName: 'PA', color: '#f57c00', isDefault: true, order: 3, createdAt: new Date() },
+  { id: 'ip', name: 'Inspector of Posts', shortName: 'IP', color: '#7b1fa2', isDefault: true, order: 4, createdAt: new Date() },
+  { id: 'group-b', name: 'Group B Officers', shortName: 'Group B', color: '#d32f2f', isDefault: true, order: 5, createdAt: new Date() },
+];
 
 // Default exam types
 const defaultExamTypes: ExamType[] = [
@@ -176,7 +194,7 @@ const safeToISOString = (date: any): string => {
 
 const CategoriesPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, adminUser } = useAuth();
   const [exams, setExams] = useState<Exam[]>([]);
   const [examTypes, setExamTypes] = useState<ExamType[]>(defaultExamTypes);
   const [loading, setLoading] = useState(true);
@@ -217,6 +235,16 @@ const CategoriesPage: React.FC = () => {
     icon: '📝',
   });
 
+  // Suitability options management states
+  const [suitabilityOptions, setSuitabilityOptions] = useState<SuitabilityOption[]>(defaultSuitabilityOptions);
+  const [openSuitabilityDialog, setOpenSuitabilityDialog] = useState(false);
+  const [editingSuitabilityOption, setEditingSuitabilityOption] = useState<SuitabilityOption | null>(null);
+  const [suitabilityForm, setSuitabilityForm] = useState({
+    name: '',
+    shortName: '',
+    color: '#1976d2',
+  });
+
   // Form states
   const [examForm, setExamForm] = useState<Partial<Exam>>({
     name: '',
@@ -234,6 +262,7 @@ const CategoriesPage: React.FC = () => {
     isFree: true,
     freeQuestionsLimit: -1,
     unlockPrice: 0,
+    topic: '',
     // Live test scheduling fields
     isLiveTest: false,
     liveTestDescription: '',
@@ -276,6 +305,7 @@ const CategoriesPage: React.FC = () => {
   useEffect(() => {
     fetchExams();
     fetchExamTypes();
+    fetchSuitabilityOptions();
   }, []);
 
   // Filtered exams based on search and filters
@@ -464,6 +494,109 @@ const CategoriesPage: React.FC = () => {
     }
   };
 
+  // Suitability Options Management Functions
+  const fetchSuitabilityOptions = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'suitabilityOptions'));
+      const customOptions: SuitabilityOption[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        customOptions.push({
+          id: doc.id,
+          name: data.name,
+          shortName: data.shortName,
+          color: data.color,
+          isDefault: false,
+          order: data.order || 100,
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+        });
+      });
+      // Combine default options with custom options, sorted by order
+      const allOptions = [...defaultSuitabilityOptions, ...customOptions].sort((a, b) => a.order - b.order);
+      setSuitabilityOptions(allOptions);
+    } catch (error) {
+      console.error('Error fetching suitability options:', error);
+      // Continue with default options only
+    }
+  };
+
+  const handleCreateSuitabilityOption = () => {
+    setEditingSuitabilityOption(null);
+    setSuitabilityForm({
+      name: '',
+      shortName: '',
+      color: '#1976d2',
+    });
+    setOpenSuitabilityDialog(true);
+  };
+
+  const handleEditSuitabilityOption = (option: SuitabilityOption) => {
+    if (option.isDefault) {
+      toast.error('Cannot edit default suitability options');
+      return;
+    }
+    setEditingSuitabilityOption(option);
+    setSuitabilityForm({
+      name: option.name,
+      shortName: option.shortName,
+      color: option.color,
+    });
+    setOpenSuitabilityDialog(true);
+  };
+
+  const handleSaveSuitabilityOption = async () => {
+    try {
+      if (!suitabilityForm.name.trim() || !suitabilityForm.shortName.trim()) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
+
+      const maxOrder = Math.max(...suitabilityOptions.map(o => o.order), 0);
+      const optionData = {
+        name: suitabilityForm.name.trim(),
+        shortName: suitabilityForm.shortName.trim(),
+        color: suitabilityForm.color,
+        isDefault: false,
+        order: editingSuitabilityOption ? editingSuitabilityOption.order : maxOrder + 1,
+        createdAt: editingSuitabilityOption ? editingSuitabilityOption.createdAt : Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+
+      if (editingSuitabilityOption) {
+        await updateDoc(doc(db, 'suitabilityOptions', editingSuitabilityOption.id), optionData);
+        toast.success('Suitability option updated successfully');
+      } else {
+        await addDoc(collection(db, 'suitabilityOptions'), optionData);
+        toast.success('Suitability option created successfully');
+      }
+
+      setOpenSuitabilityDialog(false);
+      fetchSuitabilityOptions();
+    } catch (error) {
+      console.error('Error saving suitability option:', error);
+      toast.error('Failed to save suitability option');
+    }
+  };
+
+  const handleDeleteSuitabilityOption = async (optionId: string) => {
+    const option = suitabilityOptions.find(o => o.id === optionId);
+    if (option?.isDefault) {
+      toast.error('Cannot delete default suitability options');
+      return;
+    }
+
+    if (window.confirm('Are you sure you want to delete this suitability option? This will affect existing exams using this option.')) {
+      try {
+        await deleteDoc(doc(db, 'suitabilityOptions', optionId));
+        toast.success('Suitability option deleted successfully');
+        fetchSuitabilityOptions();
+      } catch (error) {
+        console.error('Error deleting suitability option:', error);
+        toast.error('Failed to delete suitability option');
+      }
+    }
+  };
+
   // Exam Management Functions
   const handleCreateExam = () => {
     setEditingExam(null);
@@ -483,6 +616,7 @@ const CategoriesPage: React.FC = () => {
       isFree: true,
       freeQuestionsLimit: -1,
       unlockPrice: 0,
+      topic: '',
     });
 
     // Reset live test form
@@ -617,6 +751,18 @@ const CategoriesPage: React.FC = () => {
     if (!questionForm.question || questionForm.options?.some(opt => !opt.trim())) {
       toast.error('Please fill in all question fields');
       return;
+    }
+
+    // Validate that "None of the above" and "All of the above" are only in the last position
+    const specialOptionPatterns = ['none of the above', 'all of the above'];
+    const options = questionForm.options || [];
+
+    for (let i = 0; i < options.length - 1; i++) {
+      const optionLower = options[i].toLowerCase();
+      if (specialOptionPatterns.some(pattern => optionLower.includes(pattern))) {
+        toast.error(`"${options[i]}" can only be placed as the last option (Option 4)`);
+        return;
+      }
     }
 
     const newQuestion: Question = {
@@ -819,14 +965,8 @@ const CategoriesPage: React.FC = () => {
   };
 
   const getSuitabilityColor = (role: string) => {
-    const colors: { [key: string]: string } = {
-      'MTS': '#1976d2',
-      'Postman': '#388e3c',
-      'PA': '#f57c00',
-      'IP': '#7b1fa2',
-      'Group B': '#d32f2f',
-    };
-    return colors[role] || '#757575';
+    const option = suitabilityOptions.find(o => o.shortName === role);
+    return option?.color || '#757575';
   };
 
   if (loading) {
@@ -856,13 +996,13 @@ const CategoriesPage: React.FC = () => {
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={tabValue === 0 ? handleCreateExam : handleCreateExamType}
+          onClick={tabValue === 0 ? handleCreateExam : tabValue === 1 ? handleCreateExamType : handleCreateSuitabilityOption}
           sx={{
             background: 'linear-gradient(45deg, #6366F1 30%, #8B5CF6 90%)',
             boxShadow: '0 3px 5px 2px rgba(99, 102, 241, .3)',
           }}
         >
-          {tabValue === 0 ? 'Create New Exam' : 'Create Exam Type'}
+          {tabValue === 0 ? 'Create New Exam' : tabValue === 1 ? 'Create Exam Type' : 'Create Suitability Option'}
         </Button>
       </Box>
 
@@ -876,6 +1016,11 @@ const CategoriesPage: React.FC = () => {
           <Tab
             label="Exam Types"
             icon={<CategoryIcon />}
+            iconPosition="start"
+          />
+          <Tab
+            label="Suitability Options"
+            icon={<FilterIcon />}
             iconPosition="start"
           />
         </Tabs>
@@ -950,9 +1095,9 @@ const CategoriesPage: React.FC = () => {
                     onChange={(e) => setFilterSuitability(e.target.value)}
                   >
                     <MenuItem value="">All Roles</MenuItem>
-                    {examSuitabilityOptions.map((option) => (
-                      <MenuItem key={option} value={option}>
-                        {option}
+                    {suitabilityOptions.map((option) => (
+                      <MenuItem key={option.id} value={option.shortName}>
+                        {option.shortName} - {option.name}
                       </MenuItem>
                     ))}
                   </Select>
@@ -1139,24 +1284,35 @@ const CategoriesPage: React.FC = () => {
                         />
                       )}
                       {(exam.totalAttempts || 0) > 0 && (
-                        <Tooltip title="Click to view user attempts">
+                        adminUser?.role === 'user' ? (
+                          // For 'user' role: display only, no click
                           <Chip
                             label={`${exam.totalAttempts} attempts`}
                             variant="outlined"
                             size="small"
-                            onClick={() => {
-                              setSelectedExamForAttempts(exam);
-                              setOpenAttemptsDialog(true);
-                            }}
-                            sx={{
-                              fontSize: '0.7rem',
-                              cursor: 'pointer',
-                              '&:hover': {
-                                backgroundColor: 'action.hover',
-                              }
-                            }}
+                            sx={{ fontSize: '0.7rem' }}
                           />
-                        </Tooltip>
+                        ) : (
+                          // For other roles: clickable with tooltip
+                          <Tooltip title="Click to view user attempts">
+                            <Chip
+                              label={`${exam.totalAttempts} attempts`}
+                              variant="outlined"
+                              size="small"
+                              onClick={() => {
+                                setSelectedExamForAttempts(exam);
+                                setOpenAttemptsDialog(true);
+                              }}
+                              sx={{
+                                fontSize: '0.7rem',
+                                cursor: 'pointer',
+                                '&:hover': {
+                                  backgroundColor: 'action.hover',
+                                }
+                              }}
+                            />
+                          </Tooltip>
+                        )
                       )}
                     </Box>
                   </Box>
@@ -1250,7 +1406,7 @@ const CategoriesPage: React.FC = () => {
         </Grid>
           )}
         </>
-      ) : (
+      ) : tabValue === 1 ? (
         // Exam Types Management Tab
         <Grid container spacing={3}>
           {examTypes.map((examType) => (
@@ -1330,7 +1486,94 @@ const CategoriesPage: React.FC = () => {
             </Grid>
           ))}
         </Grid>
-      )}
+      ) : tabValue === 2 ? (
+        // Suitability Options Management Tab
+        <Grid container spacing={3}>
+          {suitabilityOptions.map((option) => (
+            <Grid item xs={12} sm={6} md={4} key={option.id}>
+              <Card
+                sx={{
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  transition: 'all 0.3s ease-in-out',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: 4,
+                  },
+                }}
+              >
+                <CardContent sx={{ flexGrow: 1 }}>
+                  <Box display="flex" alignItems="center" mb={2}>
+                    <Avatar
+                      sx={{
+                        bgcolor: option.color,
+                        mr: 2,
+                        fontSize: '0.9rem',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      {option.shortName.substring(0, 2)}
+                    </Avatar>
+                    <Box>
+                      <Typography variant="h6" component="h3">
+                        {option.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Short: {option.shortName}
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Chip
+                      label={option.isDefault ? 'System Default' : 'Custom'}
+                      color={option.isDefault ? 'primary' : 'secondary'}
+                      size="small"
+                    />
+                    <Box
+                      sx={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: '50%',
+                        bgcolor: option.color,
+                        border: '2px solid #e0e0e0',
+                      }}
+                    />
+                  </Box>
+                </CardContent>
+
+                <CardActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
+                  <Box>
+                    {!option.isDefault && (
+                      <Tooltip title="Edit Suitability Option">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditSuitabilityOption(option)}
+                          color="primary"
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
+                  {!option.isDefault && (
+                    <Tooltip title="Delete Suitability Option">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteSuitabilityOption(option.id)}
+                        color="error"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </CardActions>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      ) : null}
 
       {/* Create/Edit Exam Dialog */}
       <Dialog
@@ -1370,6 +1613,17 @@ const CategoriesPage: React.FC = () => {
                   onChange={(e) => setExamForm({ ...examForm, name: e.target.value })}
                   placeholder={`Enter ${examForm.examType} exam name`}
                   required
+                />
+              </Grid>
+
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Topic"
+                  value={examForm.topic || ''}
+                  onChange={(e) => setExamForm({ ...examForm, topic: e.target.value })}
+                  placeholder="Enter exam topic (e.g., Mathematics, Science)"
+                  helperText="Optional: Topic will be displayed on the quiz instruction page"
                 />
               </Grid>
 
@@ -1421,23 +1675,19 @@ const CategoriesPage: React.FC = () => {
                       </Box>
                     )}
                   >
-                    {examSuitabilityOptions.map((option) => (
-                      <MenuItem key={option} value={option}>
+                    {suitabilityOptions.map((option) => (
+                      <MenuItem key={option.id} value={option.shortName}>
                         <Box display="flex" alignItems="center">
                           <Chip
-                            label={option}
+                            label={option.shortName}
                             size="small"
                             sx={{
-                              bgcolor: getSuitabilityColor(option),
+                              bgcolor: option.color,
                               color: 'white',
                               mr: 1,
                             }}
                           />
-                          {option === 'MTS' && 'Multi Tasking Staff'}
-                          {option === 'Postman' && 'Postman'}
-                          {option === 'PA' && 'Postal Assistant'}
-                          {option === 'IP' && 'Inspector of Posts'}
-                          {option === 'Group B' && 'Group B Officers'}
+                          {option.name}
                         </Box>
                       </MenuItem>
                     ))}
@@ -2206,6 +2456,127 @@ const CategoriesPage: React.FC = () => {
             startIcon={<SaveIcon />}
           >
             {editingExamType ? 'Update Type' : 'Create Type'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Suitability Option Create/Edit Dialog */}
+      <Dialog
+        open={openSuitabilityDialog}
+        onClose={() => setOpenSuitabilityDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingSuitabilityOption ? 'Edit Suitability Option' : 'Create New Suitability Option'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Full Name"
+                  value={suitabilityForm.name}
+                  onChange={(e) => setSuitabilityForm({ ...suitabilityForm, name: e.target.value })}
+                  placeholder="e.g., Multi Tasking Staff, Postal Assistant, etc."
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Short Name"
+                  value={suitabilityForm.shortName}
+                  onChange={(e) => setSuitabilityForm({ ...suitabilityForm, shortName: e.target.value })}
+                  placeholder="e.g., MTS, PA, IP, etc."
+                  required
+                  helperText="This will be displayed in dropdowns and chips"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Color</InputLabel>
+                  <Select
+                    value={suitabilityForm.color}
+                    label="Color"
+                    onChange={(e) => setSuitabilityForm({ ...suitabilityForm, color: e.target.value })}
+                  >
+                    <MenuItem value="#1976d2">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#1976d2', mr: 1 }} />
+                        Blue
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#388e3c">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#388e3c', mr: 1 }} />
+                        Green
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#f57c00">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#f57c00', mr: 1 }} />
+                        Orange
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#7b1fa2">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#7b1fa2', mr: 1 }} />
+                        Purple
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#d32f2f">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#d32f2f', mr: 1 }} />
+                        Red
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#0288d1">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#0288d1', mr: 1 }} />
+                        Light Blue
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#00796b">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#00796b', mr: 1 }} />
+                        Teal
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="#5d4037">
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: '#5d4037', mr: 1 }} />
+                        Brown
+                      </Box>
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12}>
+                <Alert severity="info">
+                  <Typography variant="body2">
+                    Suitability options help categorize exams by the target audience (e.g., MTS, Postman, PA).
+                    These options will appear in dropdown filters in both web admin and mobile app.
+                  </Typography>
+                </Alert>
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenSuitabilityDialog(false)} startIcon={<CancelIcon />}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveSuitabilityOption}
+            variant="contained"
+            startIcon={<SaveIcon />}
+          >
+            {editingSuitabilityOption ? 'Update Option' : 'Create Option'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -261,13 +261,13 @@ class _PhoneLoginScreenState extends ConsumerState<PhoneLoginScreen>
 
                 const SizedBox(height: 24),
 
-                // Send OTP Button
+                // Sign In Button
                 LoadingButton(
-                  text: 'Send OTP',
+                  text: 'Sign In',
                   isLoading: authState.isLoading,
                   onPressed: _sendOTP,
                   expanded: true,
-                  icon: const Icon(Icons.send, size: 20),
+                  icon: const Icon(Icons.login, size: 20),
                 ),
               ],
             ),

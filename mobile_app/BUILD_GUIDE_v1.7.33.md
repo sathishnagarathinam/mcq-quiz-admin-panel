@@ -14,7 +14,7 @@
 
 ### **Step 1: Clean Previous Build**
 ```bash
-cd /Volumes/sathish/mcq/mobile_app
+cd /Volumes/work/mcq/mobile_app
 flutter clean
 ```
 
@@ -273,7 +273,7 @@ For build issues:
 
 **Command to Build**:
 ```bash
-cd /Volumes/sathish/mcq/mobile_app && \
+cd /Volumes/work/mcq/mobile_app && \
 flutter clean && \
 flutter pub get && \
 flutter build appbundle --release

@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../features/onboarding/screens/onboarding_screen.dart';
 import '../../features/auth/screens/phone_auth_redirect.dart';
+import '../../features/auth/screens/phone_login_screen.dart';
+import '../../features/auth/screens/registration_screen.dart';
 import '../../features/auth/screens/email_login_screen.dart';
 import '../../features/auth/screens/email_registration_screen.dart';
 import '../../features/auth/screens/email_verification_screen.dart';
@@ -136,7 +138,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/auth/register',
         name: 'registration',
-        builder: (context, state) => const PhoneAuthRedirectScreen(),
+        builder: (context, state) {
+          final args = state.extra as Map<String, dynamic>? ?? {};
+          return RegistrationScreen(
+            phoneNumber: args['phoneNumber'],
+            countryCode: args['countryCode'],
+          );
+        },
       ),
       GoRoute(
         path: '/auth/otp',
@@ -664,10 +672,21 @@ extension GoRouterExtension on BuildContext {
         pathParameters: {'quizId': quizId},
       );
 
-  /// Navigate to specific quiz
-  void goToQuiz(String quizId) => goNamed(
+  /// Navigate to specific quiz with optional discount info
+  void goToQuiz(String quizId,
+          {double? discountPercentage,
+          String? couponCode,
+          String? bannerRoutedFrom}) =>
+      goNamed(
         AppRoutes.quiz,
         pathParameters: {'quizId': quizId},
+        extra: (discountPercentage != null && discountPercentage > 0)
+            ? {
+                'discountPercentage': discountPercentage,
+                'couponCode': couponCode,
+                'bannerRoutedFrom': bannerRoutedFrom,
+              }
+            : null,
       );
 
   /// Navigate to quiz result

@@ -28,6 +28,10 @@ import '../../../core/models/live_test_model.dart';
 import '../../../core/services/security_service.dart';
 import '../widgets/analytics_dashboard_widget.dart';
 import '../widgets/easy_mode_home_view.dart';
+import '../../quiz/screens/quiz_ratings_page.dart';
+import '../../../core/services/quiz_statistics_service.dart';
+import '../../../core/services/interstitial_ad_service.dart';
+import '../../../shared/widgets/interstitial_ad_dialog.dart';
 
 /// Custom clipper for curved edges only (corners)
 class CurvedBottomClipper extends CustomClipper<Path> {
@@ -96,6 +100,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     'PA Questions',
     'Inspector Quiz'
   ];
+
+  // Static flag to persist across widget recreations (GoRouter recreates HomeScreen on each navigation)
+  // This ensures the ad is shown only once per app session, not on every home screen visit
+  static bool _hasShownInterstitialAd = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Show interstitial ad only once on first load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAndShowInterstitialAd();
+    });
+  }
+
+  Future<void> _checkAndShowInterstitialAd() async {
+    if (_hasShownInterstitialAd) return;
+    _hasShownInterstitialAd = true; // Set once, never reset
+
+    try {
+      final ad = await InterstitialAdService.getNextAdToShow();
+      if (ad != null && mounted) {
+        // Delay slightly to ensure the screen is fully rendered
+        await Future.delayed(const Duration(seconds: 1));
+        if (mounted) {
+          await InterstitialAdDialog.show(context, ad);
+        }
+      }
+    } catch (e) {
+      // Don't reset flag - ad check should only happen once
+      debugPrint('❌ Error showing interstitial ad: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -1154,92 +1190,171 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     ),
 
-                    // Bottom section with stats (compact)
-                    SizedBox(
-                      height: 18,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          // Questions count
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                    // Bottom section with stats and rating (compact)
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Stats row
+                        SizedBox(
+                          height: 14,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              Icon(
-                                Icons.quiz_outlined,
-                                size: 9,
-                                color: AppTheme.textSecondaryColor,
-                              ),
-                              const SizedBox(width: 1),
-                              Text(
-                                '${exam.numberOfQuestions}',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 7,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppTheme.textSecondaryColor,
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          // Attempt count
-                          if (exam.totalAttempts > 0)
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.people_outline,
-                                  size: 9,
-                                  color: accentColor,
-                                ),
-                                const SizedBox(width: 1),
-                                Text(
-                                  '${exam.totalAttempts}',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 7,
-                                    fontWeight: FontWeight.w500,
-                                    color: accentColor,
+                              // Questions count
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.quiz_outlined,
+                                    size: 9,
+                                    color: AppTheme.textSecondaryColor,
                                   ),
-                                ),
-                              ],
-                            ),
+                                  const SizedBox(width: 1),
+                                  Text(
+                                    '${exam.numberOfQuestions}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 7,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppTheme.textSecondaryColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
 
-                          // Previous attempt time
-                          lastAttemptAsync.when(
-                            data: (lastAttempt) {
-                              if (lastAttempt != null) {
-                                final timeAgo =
-                                    _getTimeAgo(lastAttempt.attemptedAt);
-                                return Row(
+                              // Attempt count
+                              if (exam.totalAttempts > 0)
+                                Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      Icons.history,
+                                      Icons.people_outline,
                                       size: 9,
-                                      color: Colors.orange,
+                                      color: accentColor,
                                     ),
                                     const SizedBox(width: 1),
                                     Text(
-                                      timeAgo,
+                                      '${exam.totalAttempts}',
                                       style: GoogleFonts.poppins(
                                         fontSize: 7,
                                         fontWeight: FontWeight.w500,
-                                        color: Colors.orange,
+                                        color: accentColor,
                                       ),
                                     ),
                                   ],
-                                );
-                              }
-                              return const SizedBox.shrink();
-                            },
-                            loading: () => const SizedBox.shrink(),
-                            error: (_, __) => const SizedBox.shrink(),
+                                ),
+
+                              // Previous attempt time
+                              lastAttemptAsync.when(
+                                data: (lastAttempt) {
+                                  if (lastAttempt != null) {
+                                    final timeAgo =
+                                        _getTimeAgo(lastAttempt.attemptedAt);
+                                    return Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.history,
+                                          size: 9,
+                                          color: Colors.orange,
+                                        ),
+                                        const SizedBox(width: 1),
+                                        Text(
+                                          timeAgo,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 7,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.orange,
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }
+                                  return const SizedBox.shrink();
+                                },
+                                loading: () => const SizedBox.shrink(),
+                                error: (_, __) => const SizedBox.shrink(),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        // Rating row (compact)
+                        const SizedBox(height: 2),
+                        _buildCompactRatingWidget(exam.id),
+                      ],
                     ),
                   ],
                 ),
               ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Compact rating widget for home screen quiz cards
+  Widget _buildCompactRatingWidget(String examId) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: QuizStatisticsService.getQuizStatistics(examId),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+
+        final stats = snapshot.data!;
+        final rating = stats['averageRating'] as double? ?? 0.0;
+        final count = stats['totalRatings'] as int? ?? 0;
+
+        if (rating == 0.0 || count == 0) {
+          return const SizedBox.shrink();
+        }
+
+        return GestureDetector(
+          onTap: () {
+            // Navigate to ratings page
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => QuizRatingsPage(
+                  examId: examId,
+                  examName: '',
+                ),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.amber.shade200, width: 0.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.star,
+                  size: 9,
+                  color: Colors.amber.shade700,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  '${rating.toStringAsFixed(1)}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.amber.shade700,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  '($count)',
+                  style: GoogleFonts.poppins(
+                    fontSize: 7,
+                    color: Colors.amber.shade600,
+                  ),
+                ),
+              ],
             ),
           ),
         );
@@ -2008,6 +2123,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                   ),
                 ),
+
+                // Rating widget
+                _buildCompactRatingWidget(exam.id),
               ],
             ),
           ),

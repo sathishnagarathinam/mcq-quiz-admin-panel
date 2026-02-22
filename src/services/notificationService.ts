@@ -12,6 +12,7 @@ import {
   limit,
   Timestamp,
   writeBatch,
+  documentId,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import {
@@ -170,38 +171,45 @@ export class NotificationService {
 
       switch (target.type) {
         case 'all':
-          // Get all active mobile users from mobile_users collection
-          q = query(usersRef, where('isActive', '==', true));
+          // Get all mobile users from mobile_users collection
+          // Don't filter by isActive in query - many users don't have this field
+          // We'll filter inactive users on the client side
+          q = query(usersRef);
           break;
         case 'specific_users':
           if (!target.userIds || target.userIds.length === 0) {
             return [];
           }
           // Firebase 'in' operator supports max 10 items, so we need to batch
+          // Use documentId() to query by actual Firestore document ID (works for both phone-only and Firebase Auth users)
           const userBatches = [];
           for (let i = 0; i < target.userIds.length; i += 10) {
             const batch = target.userIds.slice(i, i + 10);
             const batchQuery = query(
               usersRef,
-              where('uid', 'in', batch),
-              where('isActive', '==', true)
+              where(documentId(), 'in', batch)
             );
             userBatches.push(batchQuery);
           }
-          
+
           const allUsers: MobileUser[] = [];
           for (const batchQuery of userBatches) {
             const snapshot = await getDocs(batchQuery);
-            snapshot.docs.forEach(doc => {
-              const userData = doc.data();
+            snapshot.docs.forEach(docSnap => {
+              const userData = docSnap.data();
+              // Skip explicitly inactive users
+              if (userData.isActive === false) {
+                return;
+              }
               allUsers.push({
-                uid: userData.uid || doc.id,
+                uid: userData.uid || docSnap.id,
+                docId: docSnap.id, // Always use actual Firestore document ID
                 name: userData.name || '',
                 email: userData.email || '',
                 phoneNumber: userData.phoneNumber || '',
                 officeName: userData.officeName || '',
                 designation: userData.designation || '',
-                isActive: userData.isActive || true,
+                isActive: userData.isActive !== false,
                 preferences: userData.preferences,
               } as MobileUser);
             });
@@ -211,20 +219,20 @@ export class NotificationService {
           if (!target.designation) {
             return [];
           }
+          // Don't filter by isActive in query - many users don't have this field
           q = query(
             usersRef,
-            where('designation', '==', target.designation),
-            where('isActive', '==', true)
+            where('designation', '==', target.designation)
           );
           break;
         case 'office':
           if (!target.officeName) {
             return [];
           }
+          // Don't filter by isActive in query - many users don't have this field
           q = query(
             usersRef,
-            where('officeName', '==', target.officeName),
-            where('isActive', '==', true)
+            where('officeName', '==', target.officeName)
           );
           break;
         default:
@@ -233,23 +241,30 @@ export class NotificationService {
 
       if (q && (target.type === 'all' || target.type === 'designation' || target.type === 'office')) {
         const snapshot = await getDocs(q);
-        const users = snapshot.docs.map(doc => {
-          const userData = doc.data();
-          return {
-            uid: userData.uid || doc.id,
-            name: userData.name || '',
-            email: userData.email || '',
-            phoneNumber: userData.phoneNumber || '',
-            officeName: userData.officeName || '',
-            designation: userData.designation || '',
-            isActive: userData.isActive || true,
-            preferences: userData.preferences,
-            userType: userData.userType,
-            role: userData.role,
-          } as MobileUser;
-        });
+        const users = snapshot.docs
+          // Filter out explicitly inactive users (users without isActive field are treated as active)
+          .filter(doc => {
+            const userData = doc.data();
+            return userData.isActive !== false;
+          })
+          .map(doc => {
+            const userData = doc.data();
+            return {
+              uid: userData.uid || doc.id,
+              docId: doc.id, // Always use actual Firestore document ID
+              name: userData.name || '',
+              email: userData.email || '',
+              phoneNumber: userData.phoneNumber || '',
+              officeName: userData.officeName || '',
+              designation: userData.designation || '',
+              isActive: userData.isActive !== false, // Default to true if not set
+              preferences: userData.preferences,
+              userType: userData.userType,
+              role: userData.role,
+            } as MobileUser;
+          });
 
-        console.log(`Found ${users.length} mobile users from mobile_users collection`);
+        console.log(`Found ${users.length} mobile users from mobile_users collection (after filtering inactive)`);
         return users;
       }
 
@@ -510,39 +525,35 @@ export class NotificationService {
     try {
       console.log('Getting mobile users from mobile_users collection...');
 
-      const q = query(
-        collection(db, this.MOBILE_USERS_COLLECTION),
-        where('isActive', '==', true),
-        orderBy('name')
-      );
+      // Fetch ALL users and filter on client side
+      // This ensures users without 'isActive' field are included
+      // and avoids needing composite indexes
+      const snapshot = await getDocs(collection(db, this.MOBILE_USERS_COLLECTION));
+      console.log(`Found ${snapshot.docs.length} total mobile users in mobile_users collection`);
 
-      const snapshot = await getDocs(q);
-      console.log(`Found ${snapshot.docs.length} mobile users in mobile_users collection`);
+      const users = snapshot.docs
+        .map(doc => {
+          const userData = doc.data();
+          return {
+            uid: userData.uid || doc.id,
+            docId: doc.id, // Always use actual Firestore document ID
+            name: userData.name || userData.displayName || 'Unknown User',
+            email: userData.email || 'No email',
+            phoneNumber: userData.phoneNumber || userData.phone || '',
+            officeName: userData.officeName || 'Not specified',
+            designation: userData.designation || 'Not specified',
+            isActive: userData.isActive !== false, // Default to true if not set
+            preferences: userData.preferences,
+            userType: userData.userType,
+            role: userData.role,
+          } as MobileUser;
+        })
+        // Filter out explicitly inactive users (isActive === false)
+        .filter(user => user.isActive)
+        // Sort by name
+        .sort((a, b) => a.name.localeCompare(b.name));
 
-      const users = snapshot.docs.map(doc => {
-        const userData = doc.data();
-        console.log(`Processing user ${doc.id}:`, {
-          name: userData.name,
-          email: userData.email,
-          designation: userData.designation,
-          officeName: userData.officeName
-        });
-
-        return {
-          uid: userData.uid || doc.id,
-          name: userData.name || userData.displayName || 'Unknown User',
-          email: userData.email || 'No email',
-          phoneNumber: userData.phoneNumber || userData.phone || '',
-          officeName: userData.officeName || 'Not specified',
-          designation: userData.designation || 'Not specified',
-          isActive: userData.isActive !== false,
-          preferences: userData.preferences,
-          userType: userData.userType,
-          role: userData.role,
-        } as MobileUser;
-      });
-
-      console.log(`Successfully loaded ${users.length} mobile users from mobile_users collection`);
+      console.log(`Successfully loaded ${users.length} active mobile users from mobile_users collection`);
       return users;
     } catch (error) {
       console.error('Error getting mobile users:', error);
@@ -563,13 +574,15 @@ export class NotificationService {
   // Send push notification to individual user
   private static async sendPushNotification(user: MobileUser, notification: Notification): Promise<void> {
     try {
-      console.log(`🔔 [DEBUG] Starting push notification for user: ${user.name} (${user.uid})`);
+      // Use docId (actual Firestore document ID) if available, fallback to uid
+      const userDocId = user.docId || user.uid;
+      console.log(`🔔 [DEBUG] Starting push notification for user: ${user.name} (uid: ${user.uid}, docId: ${userDocId})`);
 
-      // Get user's FCM token from Firestore
-      const userDoc = await getDoc(doc(db, this.MOBILE_USERS_COLLECTION, user.uid));
+      // Get user's FCM token from Firestore using the actual document ID
+      const userDoc = await getDoc(doc(db, this.MOBILE_USERS_COLLECTION, userDocId));
 
       if (!userDoc.exists()) {
-        console.error(`❌ [DEBUG] User document not found in Firestore: ${user.uid}`);
+        console.error(`❌ [DEBUG] User document not found in Firestore: ${userDocId} (uid was: ${user.uid})`);
         return;
       }
 
@@ -581,18 +594,19 @@ export class NotificationService {
         hasFcmToken: !!fcmToken,
         fcmTokenLength: fcmToken?.length || 0,
         fcmTokenPreview: fcmToken ? `${fcmToken.substring(0, 20)}...` : 'none',
-        userDataKeys: Object.keys(userData || {})
+        userDataKeys: Object.keys(userData || {}),
+        docId: userDocId
       });
 
       if (!fcmToken) {
-        console.warn(`⚠️ [DEBUG] No FCM token found for user ${user.uid} (${user.name})`);
+        console.warn(`⚠️ [DEBUG] No FCM token found for user ${userDocId} (${user.name})`);
         console.log(`🔍 [DEBUG] Available user data keys:`, Object.keys(userData || {}));
         console.log(`💡 [DEBUG] User needs to log into mobile app to generate FCM token`);
         return;
       }
 
       if (typeof fcmToken !== 'string' || fcmToken.trim() === '') {
-        console.warn(`⚠️ [DEBUG] Invalid FCM token for user ${user.uid}: token is empty or not a string`);
+        console.warn(`⚠️ [DEBUG] Invalid FCM token for user ${userDocId}: token is empty or not a string`);
         return;
       }
 

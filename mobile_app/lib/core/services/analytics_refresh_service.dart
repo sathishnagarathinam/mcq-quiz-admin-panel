@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/quiz_attempt_model.dart';
@@ -8,11 +8,11 @@ import 'analytics_service.dart';
 /// Service to refresh analytics from existing quiz attempts
 class AnalyticsRefreshService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  static final SupabaseClient _supabase = Supabase.instance.client;
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final AnalyticsService _analyticsService = AnalyticsService();
 
   /// Get current user ID
-  static String? get currentUserId => _supabase.auth.currentUser?.id;
+  static String? get currentUserId => _auth.currentUser?.uid;
 
   /// Refresh analytics from all existing quiz attempts
   static Future<Map<String, dynamic>> refreshAnalyticsFromQuizAttempts() async {
@@ -35,7 +35,8 @@ class AnalyticsRefreshService {
           .get();
 
       if (kDebugMode) {
-        print('📊 Found ${attemptsSnapshot.docs.length} completed quiz attempts');
+        print(
+            '📊 Found ${attemptsSnapshot.docs.length} completed quiz attempts');
       }
 
       if (attemptsSnapshot.docs.isEmpty) {
@@ -57,9 +58,10 @@ class AnalyticsRefreshService {
       for (final doc in attemptsSnapshot.docs) {
         try {
           final attempt = QuizAttemptModel.fromFirestore(doc);
-          
+
           if (kDebugMode) {
-            print('🔄 Processing: ${attempt.examName} - Score: ${attempt.score}/${attempt.totalQuestions} - Time: ${attempt.timeSpent}s');
+            print(
+                '🔄 Processing: ${attempt.examName} - Score: ${attempt.score}/${attempt.totalQuestions} - Time: ${attempt.timeSpent}s');
           }
 
           // Update analytics for this attempt
@@ -68,7 +70,6 @@ class AnalyticsRefreshService {
 
           // Small delay to avoid overwhelming Firestore
           await Future.delayed(const Duration(milliseconds: 100));
-
         } catch (e) {
           errorCount++;
           if (kDebugMode) {
@@ -90,7 +91,6 @@ class AnalyticsRefreshService {
         'processedAttempts': processedCount,
         'errorCount': errorCount,
       };
-
     } catch (e) {
       if (kDebugMode) {
         print('❌ Error refreshing analytics: $e');
@@ -118,7 +118,8 @@ class AnalyticsRefreshService {
       }
 
       final analyticsData = analyticsDoc.data() as Map<String, dynamic>;
-      final completedQuizzes = analyticsData['statistics']?['totalQuizzesCompleted'] ?? 0;
+      final completedQuizzes =
+          analyticsData['statistics']?['totalQuizzesCompleted'] ?? 0;
 
       // Check if user has quiz attempts
       final attemptsSnapshot = await _firestore
@@ -131,12 +132,12 @@ class AnalyticsRefreshService {
       final hasAttempts = attemptsSnapshot.docs.isNotEmpty;
 
       if (kDebugMode) {
-        print('🔍 Analytics check: $completedQuizzes completed quizzes, has attempts: $hasAttempts');
+        print(
+            '🔍 Analytics check: $completedQuizzes completed quizzes, has attempts: $hasAttempts');
       }
 
       // Needs refresh if user has attempts but analytics show 0 completed quizzes
       return hasAttempts && completedQuizzes == 0;
-
     } catch (e) {
       if (kDebugMode) {
         print('❌ Error checking analytics: $e');
@@ -149,7 +150,7 @@ class AnalyticsRefreshService {
   static Future<void> autoRefreshIfNeeded() async {
     try {
       final needsRefresh = await needsAnalyticsRefresh();
-      
+
       if (needsRefresh) {
         if (kDebugMode) {
           print('🔄 Auto-refreshing analytics...');
@@ -195,13 +196,15 @@ class AnalyticsRefreshService {
 
       if (analyticsDoc.exists) {
         final data = analyticsDoc.data() as Map<String, dynamic>;
-        summary['analyticsCompletedQuizzes'] = data['statistics']?['totalQuizzesCompleted'] ?? 0;
-        summary['analyticsAverageScore'] = data['performance']?['averageScore'] ?? 0.0;
-        summary['analyticsCurrentStreak'] = data['statistics']?['currentStreak'] ?? 0;
+        summary['analyticsCompletedQuizzes'] =
+            data['statistics']?['totalQuizzesCompleted'] ?? 0;
+        summary['analyticsAverageScore'] =
+            data['performance']?['averageScore'] ?? 0.0;
+        summary['analyticsCurrentStreak'] =
+            data['statistics']?['currentStreak'] ?? 0;
       }
 
       return summary;
-
     } catch (e) {
       return {'error': e.toString()};
     }

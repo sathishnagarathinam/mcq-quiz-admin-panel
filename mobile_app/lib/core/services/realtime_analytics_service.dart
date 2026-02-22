@@ -1,21 +1,25 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_analytics_model.dart';
 import '../models/platform_analytics_model.dart';
 import '../models/quiz_attempt_model.dart';
 
+// Key for storing authenticated phone number
+const String _authPhoneKey = 'authenticated_phone_number';
+
 /// Service for real-time analytics data synchronization
 class RealtimeAnalyticsService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final SupabaseClient _supabase = Supabase.instance.client;
-  
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
   // Stream controllers for real-time updates
-  final StreamController<UserAnalyticsModel?> _userAnalyticsController = 
+  final StreamController<UserAnalyticsModel?> _userAnalyticsController =
       StreamController<UserAnalyticsModel?>.broadcast();
-  final StreamController<PlatformAnalyticsModel?> _platformAnalyticsController = 
+  final StreamController<PlatformAnalyticsModel?> _platformAnalyticsController =
       StreamController<PlatformAnalyticsModel?>.broadcast();
-  final StreamController<List<QuizAttemptModel>> _recentAttemptsController = 
+  final StreamController<List<QuizAttemptModel>> _recentAttemptsController =
       StreamController<List<QuizAttemptModel>>.broadcast();
 
   // Cache for performance optimization
@@ -23,7 +27,7 @@ class RealtimeAnalyticsService {
   final Map<String, DateTime> _cacheTimestamps = {};
   PlatformAnalyticsModel? _platformAnalyticsCache;
   DateTime? _platformCacheTimestamp;
-  
+
   // Firestore listeners
   StreamSubscription<DocumentSnapshot>? _userAnalyticsListener;
   StreamSubscription<DocumentSnapshot>? _platformAnalyticsListener;
@@ -32,24 +36,74 @@ class RealtimeAnalyticsService {
   // Cache duration (5 minutes)
   static const Duration _cacheDuration = Duration(minutes: 5);
 
-  /// Get current user ID
-  String? get currentUserId => _supabase.auth.currentUser?.id;
+  // Current user ID (cached)
+  String? _currentUserId;
+
+  /// Get current user ID (supports both Firebase Auth and phone auth)
+  String? get currentUserId {
+    // If already cached, return it
+    if (_currentUserId != null) {
+      return _currentUserId;
+    }
+
+    // Check Firebase Auth first
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser != null) {
+      _currentUserId = firebaseUser.uid;
+      return _currentUserId;
+    }
+
+    // For phone auth users, we need to get it from SharedPreferences
+    // This is a sync getter, so we can't use async. The user ID should be
+    // set via setCurrentUserId() method when the user logs in.
+    return _currentUserId;
+  }
+
+  /// Set current user ID (call this when user logs in via phone auth)
+  Future<void> setCurrentUserId() async {
+    // Check Firebase Auth first
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser != null) {
+      _currentUserId = firebaseUser.uid;
+      return;
+    }
+
+    // Check phone auth via SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedPhone = prefs.getString(_authPhoneKey);
+      if (savedPhone != null && savedPhone.isNotEmpty) {
+        // Return phone number without + as user ID (matches Firestore document ID)
+        _currentUserId = savedPhone.replaceAll('+', '');
+      }
+    } catch (e) {
+      print('Error getting phone user ID: $e');
+    }
+  }
+
+  /// Clear cached user ID (call this on sign out)
+  void clearCachedUserId() {
+    _currentUserId = null;
+  }
 
   /// Stream for user analytics updates
-  Stream<UserAnalyticsModel?> get userAnalyticsStream => _userAnalyticsController.stream;
+  Stream<UserAnalyticsModel?> get userAnalyticsStream =>
+      _userAnalyticsController.stream;
 
   /// Stream for platform analytics updates
-  Stream<PlatformAnalyticsModel?> get platformAnalyticsStream => _platformAnalyticsController.stream;
+  Stream<PlatformAnalyticsModel?> get platformAnalyticsStream =>
+      _platformAnalyticsController.stream;
 
   /// Stream for recent attempts updates
-  Stream<List<QuizAttemptModel>> get recentAttemptsStream => _recentAttemptsController.stream;
+  Stream<List<QuizAttemptModel>> get recentAttemptsStream =>
+      _recentAttemptsController.stream;
 
   /// Start listening to user analytics for current user
   void startUserAnalyticsListener() {
     if (currentUserId == null) return;
-    
+
     _userAnalyticsListener?.cancel();
-    
+
     _userAnalyticsListener = _firestore
         .collection('user_analytics')
         .doc(currentUserId!)
@@ -80,7 +134,7 @@ class RealtimeAnalyticsService {
   /// Start listening to platform analytics
   void startPlatformAnalyticsListener() {
     _platformAnalyticsListener?.cancel();
-    
+
     _platformAnalyticsListener = _firestore
         .collection('platform_analytics')
         .doc('global')
@@ -111,16 +165,14 @@ class RealtimeAnalyticsService {
   /// Start listening to recent quiz attempts
   void startRecentAttemptsListener({String? userId, int limit = 20}) {
     _recentAttemptsListener?.cancel();
-    
+
     Query query = _firestore.collection('quiz_attempts');
-    
+
     if (userId != null) {
       query = query.where('userId', isEqualTo: userId);
     }
-    
-    query = query
-        .orderBy('attemptedAt', descending: true)
-        .limit(limit);
+
+    query = query.orderBy('attemptedAt', descending: true).limit(limit);
 
     _recentAttemptsListener = query.snapshots().listen(
       (snapshot) {
@@ -142,17 +194,16 @@ class RealtimeAnalyticsService {
   }
 
   /// Get user analytics with caching
-  Future<UserAnalyticsModel?> getUserAnalytics(String userId, {bool forceRefresh = false}) async {
+  Future<UserAnalyticsModel?> getUserAnalytics(String userId,
+      {bool forceRefresh = false}) async {
     // Check cache first
     if (!forceRefresh && _isUserAnalyticsCacheValid(userId)) {
       return _userAnalyticsCache[userId];
     }
 
     try {
-      final doc = await _firestore
-          .collection('user_analytics')
-          .doc(userId)
-          .get();
+      final doc =
+          await _firestore.collection('user_analytics').doc(userId).get();
 
       if (doc.exists) {
         final analytics = UserAnalyticsModel.fromFirestore(doc);
@@ -168,17 +219,16 @@ class RealtimeAnalyticsService {
   }
 
   /// Get platform analytics with caching
-  Future<PlatformAnalyticsModel?> getPlatformAnalytics({bool forceRefresh = false}) async {
+  Future<PlatformAnalyticsModel?> getPlatformAnalytics(
+      {bool forceRefresh = false}) async {
     // Check cache first
     if (!forceRefresh && _isPlatformAnalyticsCacheValid()) {
       return _platformAnalyticsCache;
     }
 
     try {
-      final doc = await _firestore
-          .collection('platform_analytics')
-          .doc('global')
-          .get();
+      final doc =
+          await _firestore.collection('platform_analytics').doc('global').get();
 
       if (doc.exists) {
         final analytics = PlatformAnalyticsModel.fromFirestore(doc);
@@ -194,13 +244,14 @@ class RealtimeAnalyticsService {
   }
 
   /// Update user analytics with real-time sync
-  Future<void> updateUserAnalytics(String userId, UserAnalyticsModel analytics) async {
+  Future<void> updateUserAnalytics(
+      String userId, UserAnalyticsModel analytics) async {
     try {
       await _firestore
           .collection('user_analytics')
           .doc(userId)
           .set(analytics.toFirestore(), SetOptions(merge: true));
-      
+
       // Update cache
       _userAnalyticsCache[userId] = analytics;
       _cacheTimestamps[userId] = DateTime.now();
@@ -217,7 +268,7 @@ class RealtimeAnalyticsService {
           .collection('platform_analytics')
           .doc('global')
           .set(analytics.toFirestore(), SetOptions(merge: true));
-      
+
       // Update cache
       _platformAnalyticsCache = analytics;
       _platformCacheTimestamp = DateTime.now();
@@ -228,19 +279,20 @@ class RealtimeAnalyticsService {
   }
 
   /// Batch update multiple user analytics
-  Future<void> batchUpdateUserAnalytics(Map<String, UserAnalyticsModel> analyticsMap) async {
+  Future<void> batchUpdateUserAnalytics(
+      Map<String, UserAnalyticsModel> analyticsMap) async {
     try {
       final batch = _firestore.batch();
-      
+
       analyticsMap.forEach((userId, analytics) {
         final docRef = _firestore.collection('user_analytics').doc(userId);
         batch.set(docRef, analytics.toFirestore(), SetOptions(merge: true));
-        
+
         // Update cache
         _userAnalyticsCache[userId] = analytics;
         _cacheTimestamps[userId] = DateTime.now();
       });
-      
+
       await batch.commit();
     } catch (e) {
       print('Error batch updating user analytics: $e');
@@ -270,10 +322,11 @@ class RealtimeAnalyticsService {
 
   /// Check if user analytics cache is valid
   bool _isUserAnalyticsCacheValid(String userId) {
-    if (!_userAnalyticsCache.containsKey(userId) || !_cacheTimestamps.containsKey(userId)) {
+    if (!_userAnalyticsCache.containsKey(userId) ||
+        !_cacheTimestamps.containsKey(userId)) {
       return false;
     }
-    
+
     final cacheTime = _cacheTimestamps[userId]!;
     return DateTime.now().difference(cacheTime) < _cacheDuration;
   }
@@ -283,7 +336,7 @@ class RealtimeAnalyticsService {
     if (_platformAnalyticsCache == null || _platformCacheTimestamp == null) {
       return false;
     }
-    
+
     return DateTime.now().difference(_platformCacheTimestamp!) < _cacheDuration;
   }
 
@@ -299,7 +352,7 @@ class RealtimeAnalyticsService {
     _userAnalyticsListener?.cancel();
     _platformAnalyticsListener?.cancel();
     _recentAttemptsListener?.cancel();
-    
+
     _userAnalyticsListener = null;
     _platformAnalyticsListener = null;
     _recentAttemptsListener = null;
@@ -321,7 +374,7 @@ class RealtimeAnalyticsService {
       if (currentUserId != null) {
         await getUserAnalytics(currentUserId!);
       }
-      
+
       // Preload platform analytics
       await getPlatformAnalytics();
     } catch (e) {

@@ -30,6 +30,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Checkbox,
+  Link,
 
 } from '@mui/material';
 import {
@@ -49,6 +51,8 @@ import {
   Delete as DeleteIcon,
   Troubleshoot as TroubleshootIcon,
   VerifiedUser as VerifiedUserIcon,
+  ArrowUpward,
+  ArrowDownward,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, onSnapshot, orderBy, where, Unsubscribe, deleteDoc, doc, getDocs, updateDoc } from 'firebase/firestore';
@@ -155,6 +159,12 @@ const MobileUsersPage: React.FC = () => {
   const [resetDeviceDialogOpen, setResetDeviceDialogOpen] = useState(false);
   const [userForDeviceReset, setUserForDeviceReset] = useState<MobileUser | null>(null);
   const [isResettingDevice, setIsResettingDevice] = useState(false);
+  // Multi-select state for bulk delete
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  // Sort direction for last login column
+  const [sortLastLoginAsc, setSortLastLoginAsc] = useState(false); // false = most recent first (desc)
 
   // Store quiz attempts for real-time user stats calculation
   const quizAttemptsRef = useRef<Map<string, QuizAttempt[]>>(new Map());
@@ -290,7 +300,7 @@ const MobileUsersPage: React.FC = () => {
       realUsers.push(user);
     });
 
-    // Sort by last login (most recent first)
+    // Sort by last login (most recent first by default)
     realUsers.sort((a, b) => {
       const dateA = a.lastLoginAt?.getTime() || 0;
       const dateB = b.lastLoginAt?.getTime() || 0;
@@ -695,12 +705,85 @@ const MobileUsersPage: React.FC = () => {
     }
   };
 
+  // Multi-select handlers
+  const handleToggleSelectUser = (userId: string) => {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllUsers = (checked: boolean) => {
+    if (checked) {
+      setSelectedUserIds(new Set(filteredUsers.map(u => u.id)));
+    } else {
+      setSelectedUserIds(new Set());
+    }
+  };
+
+  const confirmBulkDeleteUsers = async () => {
+    if (selectedUserIds.size === 0) return;
+
+    setIsBulkDeleting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      if (!process.env.REACT_APP_FUNCTIONS_URL) {
+        throw new Error('Cloud Functions URL is not configured.');
+      }
+
+      for (const userId of Array.from(selectedUserIds)) {
+        try {
+          const deleteUrl = `${process.env.REACT_APP_FUNCTIONS_URL}/users/${userId}`;
+          const response = await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+          if (response.ok) {
+            successCount++;
+          } else {
+            failCount++;
+            console.error(`Failed to delete user ${userId}: ${response.status}`);
+          }
+        } catch (err) {
+          failCount++;
+          console.error(`Error deleting user ${userId}:`, err);
+        }
+      }
+
+      setBulkDeleteDialogOpen(false);
+      setSelectedUserIds(new Set());
+
+      if (failCount === 0) {
+        toast.success(`Successfully deleted ${successCount} user(s) and all related data.`);
+      } else {
+        toast.error(`Deleted ${successCount} user(s), but ${failCount} failed. Check console for details.`);
+      }
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      toast.error(`Bulk delete failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.officeName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesDesignation = !filterDesignation || user.designation === filterDesignation;
     return matchesSearch && matchesDesignation;
+  }).sort((a, b) => {
+    const dateA = a.lastLoginAt?.getTime() || 0;
+    const dateB = b.lastLoginAt?.getTime() || 0;
+    return sortLastLoginAsc ? dateA - dateB : dateB - dateA;
   });
 
   const getActivityColor = (level: string) => {
@@ -936,8 +1019,20 @@ const MobileUsersPage: React.FC = () => {
                 Showing {filteredUsers.length} of {users.length} mobile users
                 {searchTerm && ` matching "${searchTerm}"`}
                 {filterDesignation && ` with designation "${filterDesignation}"`}
+                {selectedUserIds.size > 0 && ` • ${selectedUserIds.size} selected`}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
+                {selectedUserIds.size > 0 && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => setBulkDeleteDialogOpen(true)}
+                  >
+                    Delete Selected ({selectedUserIds.size})
+                  </Button>
+                )}
                 {(searchTerm || filterDesignation) && (
                   <Button
                     size="small"
@@ -989,6 +1084,13 @@ const MobileUsersPage: React.FC = () => {
               <Table>
                 <TableHead>
                   <TableRow>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        indeterminate={selectedUserIds.size > 0 && selectedUserIds.size < filteredUsers.length}
+                        checked={filteredUsers.length > 0 && selectedUserIds.size === filteredUsers.length}
+                        onChange={(e) => handleSelectAllUsers(e.target.checked)}
+                      />
+                    </TableCell>
                     <TableCell>User</TableCell>
                     <TableCell>Designation</TableCell>
                     <TableCell>Office</TableCell>
@@ -998,23 +1100,44 @@ const MobileUsersPage: React.FC = () => {
                     <TableCell>Streak</TableCell>
                     <TableCell>Paid Amount</TableCell>
                     <TableCell>Email Verified</TableCell>
-                    <TableCell>Last Login</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }} onClick={() => setSortLastLoginAsc(!sortLastLoginAsc)}>
+                        Last Login
+                        <Tooltip title={sortLastLoginAsc ? 'Oldest first' : 'Newest first'}>
+                          <IconButton size="small" sx={{ ml: 0.5 }}>
+                            {sortLastLoginAsc ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />}
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
                     <TableCell>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredUsers.map((user) => (
-                    <TableRow key={user.id}>
+                    <TableRow key={user.id} selected={selectedUserIds.has(user.id)}>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={selectedUserIds.has(user.id)}
+                          onChange={() => handleToggleSelectUser(user.id)}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
                             {user.name.charAt(0).toUpperCase()}
                           </Avatar>
                           <Box>
-                            <Typography variant="body2" fontWeight="medium">
+                            <Link
+                              component="button"
+                              variant="body2"
+                              underline="hover"
+                              sx={{ fontWeight: 'medium', cursor: 'pointer', textAlign: 'left' }}
+                              onClick={() => handleViewAnalytics(user)}
+                            >
                               {user.name}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
+                            </Link>
+                            <Typography variant="caption" color="text.secondary" display="block">
                               {user.email}
                             </Typography>
                             {user.phone && (
@@ -1629,6 +1752,41 @@ const MobileUsersPage: React.FC = () => {
             ) : (
               'Reset Device Binding'
             )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog
+        open={bulkDeleteDialogOpen}
+        onClose={() => !isBulkDeleting && setBulkDeleteDialogOpen(false)}
+      >
+        <DialogTitle sx={{ color: 'error.main' }}>
+          Delete {selectedUserIds.size} User(s)?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" gutterBottom>
+            Are you sure you want to delete <strong>{selectedUserIds.size}</strong> selected user(s)?
+          </Typography>
+          <Alert severity="error" sx={{ mt: 1 }}>
+            This action is irreversible. All user data, quiz attempts, and related records will be permanently deleted.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setBulkDeleteDialogOpen(false)}
+            disabled={isBulkDeleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmBulkDeleteUsers}
+            color="error"
+            variant="contained"
+            disabled={isBulkDeleting}
+            startIcon={isBulkDeleting ? <CircularProgress size={16} /> : <DeleteIcon />}
+          >
+            {isBulkDeleting ? `Deleting... (${selectedUserIds.size})` : `Delete ${selectedUserIds.size} User(s)`}
           </Button>
         </DialogActions>
       </Dialog>

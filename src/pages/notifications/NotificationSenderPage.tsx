@@ -195,7 +195,8 @@ const NotificationSenderPage: React.FC = () => {
 
       const target: NotificationTarget = {
         type: targetType,
-        userIds: targetType === 'specific_users' ? selectedUsers.map(u => u.uid) : undefined,
+        // Use docId (actual Firestore document ID) for specific users - works for both phone-only and Firebase Auth users
+        userIds: targetType === 'specific_users' ? selectedUsers.map(u => u.docId || u.uid) : undefined,
         designation: targetType === 'designation' ? selectedDesignation : undefined,
         officeName: targetType === 'office' ? selectedOffice : undefined,
       };

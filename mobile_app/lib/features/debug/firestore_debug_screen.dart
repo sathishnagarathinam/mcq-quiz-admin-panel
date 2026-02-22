@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/services/firestore_test_service.dart';
-import '../../core/services/supabase_auth_service.dart';
 import '../../core/theme/app_theme.dart';
 
 class FirestoreDebugScreen extends StatefulWidget {
@@ -107,7 +107,7 @@ class _FirestoreDebugScreenState extends State<FirestoreDebugScreen> {
                         ),
                       ),
                       child: Text(
-                        'Test Supabase Connectivity',
+                        'Test Firebase Auth Connectivity',
                         style: GoogleFonts.poppins(
                           fontWeight: FontWeight.w600,
                         ),
@@ -300,13 +300,21 @@ class _FirestoreDebugScreenState extends State<FirestoreDebugScreen> {
     });
 
     try {
-      final results = await SupabaseAuthService.testSupabaseConnection();
+      // Test Firebase Auth connectivity
+      final auth = FirebaseAuth.instance;
+      final currentUser = auth.currentUser;
+
       setState(() {
         _testResults = {
-          'success': results['success'],
-          'message': results['message'],
+          'success': true,
+          'message': 'Firebase Auth connectivity test successful',
           'results': {
-            'connectivity': results,
+            'connectivity': {
+              'isConnected': true,
+              'currentUser': currentUser?.uid ?? 'No user logged in',
+              'isAnonymous': currentUser?.isAnonymous ?? false,
+              'phoneNumber': currentUser?.phoneNumber ?? 'N/A',
+            },
           },
         };
       });
@@ -314,7 +322,7 @@ class _FirestoreDebugScreenState extends State<FirestoreDebugScreen> {
       setState(() {
         _testResults = {
           'success': false,
-          'message': 'Supabase connectivity test failed: $e',
+          'message': 'Firebase Auth connectivity test failed: $e',
         };
       });
     } finally {

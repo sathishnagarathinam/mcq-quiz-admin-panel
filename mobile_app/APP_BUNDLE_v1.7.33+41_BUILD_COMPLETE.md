@@ -17,7 +17,7 @@
 
 ### **Build Output**
 - **File**: `DakshinPostalAcademy_v1.7.33+41_GooglePlay_Release_DeleteUserFix_20260116_121218.aab`
-- **Location**: `/Volumes/sathish/mcq/mobile_app/`
+- **Location**: `/Volumes/work/mcq/mobile_app/`
 - **Size**: 65 MB
 - **Format**: Android App Bundle (AAB)
 - **Type**: Zip archive (deflate compression)
@@ -178,11 +178,11 @@ Improvements:
 ### **Build Output**
 - **Original**: `build/app/outputs/bundle/release/app-release.aab`
 - **Copy**: `DakshinPostalAcademy_v1.7.33+41_GooglePlay_Release_DeleteUserFix_20260116_121218.aab`
-- **Location**: `/Volumes/sathish/mcq/mobile_app/`
+- **Location**: `/Volumes/work/mcq/mobile_app/`
 
 ### **Build Log**
 - **Log File**: `build_appbundle_v1.7.33.log`
-- **Location**: `/Volumes/sathish/mcq/mobile_app/`
+- **Location**: `/Volumes/work/mcq/mobile_app/`
 
 ---
 

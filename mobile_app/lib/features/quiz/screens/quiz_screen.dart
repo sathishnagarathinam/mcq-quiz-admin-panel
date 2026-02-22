@@ -1,17 +1,24 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart' as provider;
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/models/exam_model.dart';
+import '../../../core/models/paid_quiz_access_model.dart';
 import '../../../core/services/exam_service.dart';
+import '../../../core/services/paid_quiz_access_service.dart';
 import '../../../core/providers/quiz_attempt_provider.dart';
 import '../../../core/providers/analytics_provider.dart';
+import '../../../core/providers/payment_provider.dart';
 import '../../../shared/widgets/loading_button.dart';
-import '../../../shared/widgets/government_source_attribution.dart';
 import '../../../core/widgets/global_security_wrapper.dart';
 import '../../../core/widgets/screenshot_blocker.dart';
 
@@ -43,15 +50,38 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
   final Map<String, dynamic> _userAnswers = {};
   final Set<int> _skippedQuestions = {};
 
+  // Freemium quiz tracking
+  int _freeQuestionsCount = 0;
+  bool _hasShownPaymentDialog = false;
+  bool _hasPaidForFullAccess = false;
+
+  // Razorpay payment
+  late Razorpay _razorpay;
+  bool _isProcessingPayment = false;
+  String? _currentMerchantOrderId;
+
+  // Flag to block all interactions when navigating to result
+  bool _isNavigatingToResult = false;
+
   @override
   void initState() {
     super.initState();
+    _initializeRazorpay();
     _loadExam();
+  }
+
+  void _initializeRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    developer.log('✅ Razorpay initialized for freemium quiz');
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _razorpay.clear();
     super.dispose();
   }
 
@@ -81,8 +111,20 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
         correctAnswer: newCorrectIndex,
         explanation: question.explanation,
         difficulty: question.difficulty,
+        isFree: question.isFree, // Preserve the isFree flag
       );
     }).toList();
+  }
+
+  /// Filter questions for freemium quiz - only include free questions
+  List<QuestionModel> _filterFreeQuestions(List<QuestionModel> questions) {
+    return questions.where((q) => q.isFree).toList();
+  }
+
+  /// Check if this is a freemium quiz
+  bool get _isFreemiumQuiz {
+    if (_exam == null) return false;
+    return _exam!.isFreemium;
   }
 
   /// Start the quiz timer
@@ -102,7 +144,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
   }
 
   /// Handle when time runs out
-  void _handleTimeUp() {
+  Future<void> _handleTimeUp() async {
     // Save current answer if selected
     if (_selectedAnswerIndex != null && _exam != null) {
       final currentQuestion = _shuffledQuestions[_currentQuestionIndex];
@@ -119,7 +161,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     }
 
     // Complete the quiz
-    _completeQuizAttempt();
+    await _completeQuizAttempt();
     if (mounted) {
       context.goToQuizResult(
           widget.quizId, _score, _userAnswers, _shuffledQuestions);
@@ -158,33 +200,115 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
         return;
       }
 
-      // Shuffle questions and answers
-      final shuffledQuestions = _shuffleQuestions(exam.questions);
+      // Apply discount information if passed from banner navigation
+      ExamModel examWithDiscount = exam;
+      if (mounted) {
+        try {
+          final state = GoRouterState.of(context);
+          final extra = state.extra as Map<String, dynamic>?;
+
+          if (extra != null) {
+            final discountPercentage =
+                extra['discountPercentage'] as double? ?? 0.0;
+            final couponCode = extra['couponCode'] as String?;
+            final bannerRoutedFrom = extra['bannerRoutedFrom'] as String?;
+
+            if (discountPercentage > 0) {
+              developer.log('💰 Applying discount from banner to quiz:');
+              developer.log('   - Discount: $discountPercentage%');
+              developer.log('   - Coupon: $couponCode');
+              developer.log('   - Banner ID: $bannerRoutedFrom');
+
+              examWithDiscount = ExamModel(
+                id: exam.id,
+                name: exam.name,
+                examType: exam.examType,
+                questions: exam.questions,
+                numberOfQuestions: exam.numberOfQuestions,
+                timeLimit: exam.timeLimit,
+                suitableFor: exam.suitableFor,
+                isFree: exam.isFree,
+                price: exam.price,
+                isActive: exam.isActive,
+                createdAt: exam.createdAt,
+                updatedAt: exam.updatedAt,
+                currency: exam.currency,
+                shareCount: exam.shareCount,
+                lastSharedAt: exam.lastSharedAt,
+                discountPercentage: discountPercentage,
+                bannerRoutedFrom: bannerRoutedFrom,
+                couponCode: couponCode,
+                freeQuestionsLimit: exam.freeQuestionsLimit,
+                unlockPrice: exam.unlockPrice,
+              );
+            }
+          }
+        } catch (e) {
+          developer.log('⚠️ Error reading discount data from route: $e');
+        }
+      }
+
+      // For freemium quizzes, organize questions: free questions first, then paid
+      List<QuestionModel> questionsToUse = examWithDiscount.questions;
+      int freeCount = 0;
+
+      if (examWithDiscount.isFreemium) {
+        // Separate free and paid questions
+        final freeQuestions =
+            examWithDiscount.questions.where((q) => q.isFree).toList();
+        final paidQuestions =
+            examWithDiscount.questions.where((q) => !q.isFree).toList();
+        freeCount = freeQuestions.length;
+
+        debugPrint(
+            '📋 Freemium quiz: ${freeQuestions.length} free questions, ${paidQuestions.length} paid questions');
+
+        if (freeQuestions.isEmpty) {
+          setState(() {
+            _error =
+                'No free questions available for this quiz. Please purchase to access all questions.';
+            _isLoading = false;
+          });
+          return;
+        }
+
+        // Shuffle free and paid questions separately, then combine
+        final shuffledFree = _shuffleQuestions(freeQuestions);
+        final shuffledPaid = _shuffleQuestions(paidQuestions);
+        questionsToUse = [...shuffledFree, ...shuffledPaid];
+      }
+
+      // Shuffle questions and answers (for non-freemium quizzes)
+      final shuffledQuestions = examWithDiscount.isFreemium
+          ? questionsToUse // Already shuffled above
+          : _shuffleQuestions(questionsToUse);
 
       // Start quiz attempt tracking
       try {
         final attemptNotifier = ref.read(currentQuizAttemptProvider.notifier);
-        final attemptId = await attemptNotifier.startAttempt(exam);
+        final attemptId = await attemptNotifier.startAttempt(examWithDiscount);
 
         setState(() {
-          _exam = exam;
+          _exam = examWithDiscount;
           _shuffledQuestions = shuffledQuestions;
           _currentAttemptId = attemptId;
           _startTime = DateTime.now();
           _remainingTimeInSeconds =
-              exam.timeLimit * 60; // Convert minutes to seconds
+              examWithDiscount.timeLimit * 60; // Convert minutes to seconds
+          _freeQuestionsCount = freeCount;
           _isLoading = false;
         });
 
         // Start the timer
         _startTimer();
       } catch (e) {
-        print('Failed to start quiz attempt tracking: $e');
+        debugPrint('Failed to start quiz attempt tracking: $e');
         // Continue with quiz even if attempt tracking fails
         setState(() {
-          _exam = exam;
+          _exam = examWithDiscount;
           _shuffledQuestions = shuffledQuestions;
-          _remainingTimeInSeconds = exam.timeLimit * 60;
+          _remainingTimeInSeconds = examWithDiscount.timeLimit * 60;
+          _freeQuestionsCount = freeCount;
           _isLoading = false;
         });
 
@@ -302,6 +426,35 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
   }
 
   Widget _buildBody() {
+    // Show loading overlay when navigating to result (blocks all interactions)
+    if (_isNavigatingToResult) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(
+              'Preparing your results...',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textPrimaryColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Please wait',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: AppTheme.textSecondaryColor,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_isLoading) {
       return const Center(
         child: Column(
@@ -606,7 +759,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     );
   }
 
-  void _handleNext() {
+  Future<void> _handleNext() async {
     if (_selectedAnswerIndex == null || _shuffledQuestions.isEmpty) return;
 
     final currentQuestion = _shuffledQuestions[_currentQuestionIndex];
@@ -625,6 +778,35 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     }
 
     if (_currentQuestionIndex < _shuffledQuestions.length - 1) {
+      final nextIndex = _currentQuestionIndex + 1;
+
+      // Check if this is a freemium quiz and we're about to move to paid questions
+      if (_isFreemiumQuiz &&
+          !_hasShownPaymentDialog &&
+          !_hasPaidForFullAccess &&
+          nextIndex >= _freeQuestionsCount) {
+        // Check if user has valid paid access from Firestore
+        final accessStatus = await PaidQuizAccessService.getQuizAccessStatus(
+          examId: widget.quizId,
+          exam: _exam!,
+        );
+
+        developer.log('🔍 Access status check: $accessStatus');
+
+        // If user has valid paid access or admin-granted free access, allow
+        if (accessStatus == QuizAccessStatus.purchased ||
+            accessStatus == QuizAccessStatus.free) {
+          developer.log(
+              '✅ User has valid access ($accessStatus) - allowing access to paid questions');
+          _hasPaidForFullAccess = true;
+        } else {
+          developer.log(
+              '❌ No valid access ($accessStatus) - showing payment dialog');
+          _showFreemiumPaymentDialog();
+          return;
+        }
+      }
+
       // Move to next question
       setState(() {
         _currentQuestionIndex++;
@@ -635,19 +817,97 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
       });
     } else {
       // Quiz finished - complete the attempt
-      _completeQuizAttempt();
-      context.goToQuizResult(
-          widget.quizId, _score, _userAnswers, _shuffledQuestions);
+      await _completeQuizAttempt();
+      if (mounted) {
+        context.goToQuizResult(
+            widget.quizId, _score, _userAnswers, _shuffledQuestions);
+      }
     }
   }
 
-  void _handleSkip() {
+  Future<void> _handleSkip() async {
     if (_shuffledQuestions.isEmpty) return;
 
     // Mark question as skipped
     _skippedQuestions.add(_currentQuestionIndex);
 
+    // For freemium quizzes, check if we're at the last free question
+    if (_isFreemiumQuiz && !_hasPaidForFullAccess) {
+      // Check if current question is the last free question
+      if (_currentQuestionIndex >= _freeQuestionsCount - 1) {
+        // Check if user has valid paid access from Firestore
+        final accessStatus = await PaidQuizAccessService.getQuizAccessStatus(
+          examId: widget.quizId,
+          exam: _exam!,
+        );
+
+        developer.log('🔍 Access status check (skip): $accessStatus');
+
+        // If user has valid paid access or admin-granted free access, allow
+        if (accessStatus == QuizAccessStatus.purchased ||
+            accessStatus == QuizAccessStatus.free) {
+          developer.log(
+              '✅ User has valid access ($accessStatus) - allowing skip to paid questions');
+          _hasPaidForFullAccess = true;
+        } else {
+          if (!_hasShownPaymentDialog) {
+            _showFreemiumPaymentDialog();
+            return;
+          } else {
+            // Payment dialog was already shown and user didn't pay
+            // Finish the quiz with only free questions
+            await _completeQuizAttempt();
+            final freeQuestionsOnly =
+                _shuffledQuestions.take(_freeQuestionsCount).toList();
+            if (mounted) {
+              context.goToQuizResult(
+                  widget.quizId, _score, _userAnswers, freeQuestionsOnly);
+            }
+            return;
+          }
+        }
+      }
+    }
+
     if (_currentQuestionIndex < _shuffledQuestions.length - 1) {
+      final nextIndex = _currentQuestionIndex + 1;
+
+      // For freemium quizzes, prevent skipping beyond free questions if not paid
+      if (_isFreemiumQuiz &&
+          !_hasPaidForFullAccess &&
+          nextIndex >= _freeQuestionsCount) {
+        // Check if user has valid paid access from Firestore
+        final accessStatus = await PaidQuizAccessService.getQuizAccessStatus(
+          examId: widget.quizId,
+          exam: _exam!,
+        );
+
+        developer.log('🔍 Access status check (skip next): $accessStatus');
+
+        // If user has valid paid access or admin-granted free access, allow
+        if (accessStatus == QuizAccessStatus.purchased ||
+            accessStatus == QuizAccessStatus.free) {
+          developer.log(
+              '✅ User has valid access ($accessStatus) - allowing skip to paid questions');
+          _hasPaidForFullAccess = true;
+        } else {
+          if (!_hasShownPaymentDialog) {
+            _showFreemiumPaymentDialog();
+          } else {
+            // Payment dialog was already shown and user didn't pay
+            // Finish the quiz with only free questions
+            await _completeQuizAttempt();
+            final freeQuestionsOnly =
+                _shuffledQuestions.take(_freeQuestionsCount).toList();
+            if (mounted) {
+              context.goToQuizResult(
+                  widget.quizId, _score, _userAnswers, freeQuestionsOnly);
+            }
+          }
+          return;
+        }
+      }
+
       // Move to next question
       setState(() {
         _currentQuestionIndex++;
@@ -662,6 +922,508 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
       context.goToQuizResult(
           widget.quizId, _score, _userAnswers, _shuffledQuestions);
     }
+  }
+
+  /// Show payment dialog for freemium quiz when user completes free questions
+  Future<void> _showFreemiumPaymentDialog() async {
+    setState(() {
+      _hasShownPaymentDialog = true;
+    });
+
+    final paidQuestionsCount = _shuffledQuestions.length - _freeQuestionsCount;
+    final unlockPrice = _exam?.unlockPrice ?? _exam?.price ?? 0.0;
+
+    // Check if discount is available from banner navigation
+    final hasDiscount = _exam?.hasDiscount ?? false;
+    final discountPercentage = _exam?.discountPercentage ?? 0.0;
+    final discountedPrice = hasDiscount
+        ? unlockPrice - (unlockPrice * discountPercentage / 100)
+        : unlockPrice;
+
+    debugPrint('💳 Freemium Unlock Dialog:');
+    debugPrint('   - Unlock Price: ₹$unlockPrice');
+    debugPrint('   - Has Discount: $hasDiscount');
+    debugPrint('   - Discount: $discountPercentage%');
+    debugPrint('   - Discounted Price: ₹$discountedPrice');
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.lock_open, color: AppTheme.primaryColor),
+            const SizedBox(width: 8),
+            Text(
+              'Unlock Full Quiz',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                fontSize: 18,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You have completed all $_freeQuestionsCount free questions!',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.quiz, color: Colors.blue.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '$paidQuestionsCount more questions available',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.blue.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Show discount information if available
+            if (hasDiscount) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '₹${unlockPrice.toStringAsFixed(0)}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: AppTheme.textSecondaryColor,
+                      decoration: TextDecoration.lineThrough,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${discountPercentage.toStringAsFixed(0)}% OFF',
+                      style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+            Text(
+              hasDiscount
+                  ? 'Pay ₹${discountedPrice.toStringAsFixed(0)} to unlock all questions and continue the quiz.'
+                  : 'Pay ₹${unlockPrice.toStringAsFixed(0)} to unlock all questions and continue the quiz.',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: AppTheme.textSecondaryColor,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              'Finish Quiz',
+              style: GoogleFonts.poppins(
+                color: AppTheme.textSecondaryColor,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              hasDiscount
+                  ? 'Pay ₹${discountedPrice.toStringAsFixed(0)}'
+                  : 'Pay ₹${unlockPrice.toStringAsFixed(0)}',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      // User wants to pay - start Razorpay payment flow
+      await _startFreemiumPayment();
+    } else {
+      // User chose to finish quiz with free questions only
+      // Calculate score for only the free questions
+      int freeQuestionsScore = 0;
+      for (int i = 0; i < _freeQuestionsCount; i++) {
+        final answerKey = 'question_$i';
+        if (_userAnswers.containsKey(answerKey)) {
+          final answer = _userAnswers[answerKey];
+          if (answer['isCorrect'] == true) {
+            freeQuestionsScore++;
+          }
+        }
+      }
+
+      await _completeQuizAttempt();
+      if (mounted) {
+        // Only pass the free questions that were answered
+        final freeQuestionsOnly =
+            _shuffledQuestions.take(_freeQuestionsCount).toList();
+        context.goToQuizResult(
+            widget.quizId, freeQuestionsScore, _userAnswers, freeQuestionsOnly);
+      }
+    }
+  }
+
+  /// Start Razorpay payment for freemium quiz unlock
+  Future<void> _startFreemiumPayment() async {
+    if (_exam == null) return;
+
+    setState(() {
+      _isProcessingPayment = true;
+    });
+
+    try {
+      developer.log('🚀 Starting Razorpay payment for freemium quiz unlock...');
+
+      // Get user details from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final userPhone = prefs.getString('authenticated_phone_number') ?? '';
+      final userId = userPhone.replaceAll('+', '');
+      final userEmail = prefs.getString('user_email') ?? '$userId@mcqquiz.app';
+
+      // Get payment provider
+      final paymentProvider =
+          provider.Provider.of<PaymentProvider>(context, listen: false);
+
+      // Calculate unlock price with discount if available
+      final baseUnlockPrice =
+          _exam!.unlockPrice > 0 ? _exam!.unlockPrice : _exam!.price;
+      final hasDiscount = _exam!.hasDiscount;
+      final discountPercentage = _exam!.discountPercentage;
+      final unlockPrice = hasDiscount
+          ? baseUnlockPrice - (baseUnlockPrice * discountPercentage / 100)
+          : baseUnlockPrice;
+
+      developer.log('💳 Freemium Payment:');
+      developer.log('   - Base Price: ₹$baseUnlockPrice');
+      developer.log('   - Has Discount: $hasDiscount');
+      developer.log('   - Discount: $discountPercentage%');
+      developer.log('   - Final Price: ₹$unlockPrice');
+
+      // Create a temporary exam model with unlock price for payment
+      // Include discount info so payment provider can use it
+      final examForPayment = ExamModel(
+        id: _exam!.id,
+        name: _exam!.name,
+        customName: '${_exam!.displayName} - Unlock Full Quiz',
+        examType: _exam!.examType,
+        questions: _exam!.questions,
+        numberOfQuestions: _exam!.numberOfQuestions,
+        timeLimit: _exam!.timeLimit,
+        suitableFor: _exam!.suitableFor,
+        isFree: false,
+        price: unlockPrice, // Use discounted price
+        isActive: _exam!.isActive,
+        createdAt: _exam!.createdAt,
+        updatedAt: _exam!.updatedAt,
+        discountPercentage: discountPercentage,
+        bannerRoutedFrom: _exam!.bannerRoutedFrom,
+        couponCode: _exam!.couponCode,
+      );
+
+      developer
+          .log('⏳ Creating Razorpay order for unlock price: ₹$unlockPrice');
+
+      final orderResponse = await paymentProvider.createRazorpayOrder(
+        exam: examForPayment,
+        userEmail: userEmail,
+        userPhone: userPhone,
+        userId: userId,
+      );
+
+      if (!mounted) return;
+
+      if (!orderResponse.success || orderResponse.data == null) {
+        developer.log('❌ Failed to create order: ${orderResponse.message}');
+        setState(() {
+          _isProcessingPayment = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Payment failed: ${orderResponse.message ?? "Unknown error"}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final orderData = orderResponse.data!;
+      _currentMerchantOrderId = orderData.merchantOrderId;
+
+      developer.log('✅ Order created, opening Razorpay checkout...');
+      developer.log('   Order ID: ${orderData.orderId}');
+      developer.log('   Amount: ${orderData.amount}');
+
+      // Open Razorpay checkout
+      final options = {
+        'key': orderData.keyId,
+        'amount': orderData.amount,
+        'currency': orderData.currency,
+        'order_id': orderData.orderId,
+        'name': 'MCQ Quiz App',
+        'description': 'Unlock Full Quiz - ${_exam!.displayName}',
+        'prefill': {
+          'email': userEmail,
+          'contact': userPhone,
+        },
+        'external': {
+          'wallets': ['paytm'],
+        },
+        'theme': {
+          'color': '#1976D2',
+        },
+        'notes': {
+          'merchantOrderId': orderData.merchantOrderId,
+          'examId': _exam!.id,
+          'userId': userId,
+          'type': 'freemium_unlock',
+        },
+      };
+
+      developer.log('📱 Opening Razorpay with options...');
+      _razorpay.open(options);
+    } catch (e) {
+      developer.log('❌ Payment error: $e');
+      if (mounted) {
+        setState(() {
+          _isProcessingPayment = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Handle successful Razorpay payment
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    developer.log('✅ Razorpay payment success for freemium unlock!');
+    developer.log('   Payment ID: ${response.paymentId}');
+    developer.log('   Order ID: ${response.orderId}');
+
+    if (!mounted) return;
+
+    // Verify payment with backend
+    try {
+      final paymentProvider =
+          provider.Provider.of<PaymentProvider>(context, listen: false);
+      final verified = await paymentProvider.verifyRazorpayPayment(
+        paymentId: response.paymentId ?? '',
+        orderId: response.orderId ?? '',
+        signature: response.signature ?? '',
+        merchantOrderId: _currentMerchantOrderId ?? '',
+      );
+
+      if (!mounted) return;
+
+      if (verified) {
+        developer.log('✅ Payment verified successfully!');
+
+        // Create access record
+        try {
+          await PaidQuizAccessService.createAccessRecord(
+            examId: _exam!.id,
+            examName: _exam!.displayName,
+            paymentId: response.paymentId ?? '',
+          );
+          developer.log('✅ Access record created');
+        } catch (e) {
+          developer.log('⚠️ Error creating access record: $e');
+        }
+
+        // Payment successful - unlock full quiz
+        setState(() {
+          _hasPaidForFullAccess = true;
+          _isProcessingPayment = false;
+          _currentQuestionIndex++;
+          _selectedAnswerIndex = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Payment successful! Full quiz unlocked.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        developer.log('❌ Payment verification failed');
+        setState(() {
+          _isProcessingPayment = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Payment verification failed. Please contact support.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      developer.log('❌ Verification error: $e');
+      if (mounted) {
+        setState(() {
+          _isProcessingPayment = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Verification error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Handle Razorpay payment error
+  void _handlePaymentError(PaymentFailureResponse response) async {
+    developer.log('❌ Razorpay payment failed');
+    developer.log('   Code: ${response.code}');
+    developer.log('   Message: ${response.message}');
+
+    if (!mounted) return;
+
+    // IMPORTANT: For freemium quizzes, payment cancellation/failure means
+    // the user cannot continue to paid questions. Force quiz completion.
+    // Set this flag IMMEDIATELY to block all user interactions
+    if (_isFreemiumQuiz && !_hasPaidForFullAccess) {
+      setState(() {
+        _isProcessingPayment = false;
+        _isNavigatingToResult = true; // Block all interactions immediately
+      });
+
+      developer.log(
+          '🔒 Payment cancelled/failed for freemium quiz - forcing quiz completion');
+
+      String errorMessage = 'Payment failed';
+      switch (response.code) {
+        case Razorpay.NETWORK_ERROR:
+          errorMessage =
+              'Network error. Please check your internet connection.';
+          break;
+        case Razorpay.INVALID_OPTIONS:
+          errorMessage = 'Invalid payment configuration.';
+          break;
+        case Razorpay.PAYMENT_CANCELLED:
+          errorMessage = 'Payment was cancelled. Showing your results...';
+          break;
+        default:
+          errorMessage =
+              response.message ?? 'Payment failed. Showing your results...';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // Calculate score for only the free questions
+      int freeQuestionsScore = 0;
+      for (int i = 0; i < _freeQuestionsCount; i++) {
+        final answerKey = 'question_$i';
+        if (_userAnswers.containsKey(answerKey)) {
+          final answer = _userAnswers[answerKey];
+          if (answer['isCorrect'] == true) {
+            freeQuestionsScore++;
+          }
+        }
+      }
+
+      // Complete the quiz attempt with only free questions
+      await _completeQuizAttemptWithTotalQuestions(
+          freeQuestionsScore, _freeQuestionsCount);
+
+      if (mounted) {
+        // Navigate to result screen with only free questions
+        final freeQuestionsOnly =
+            _shuffledQuestions.take(_freeQuestionsCount).toList();
+        context.goToQuizResult(
+            widget.quizId, freeQuestionsScore, _userAnswers, freeQuestionsOnly);
+      }
+    } else {
+      // Non-freemium quiz or already paid - just show error
+      setState(() {
+        _isProcessingPayment = false;
+      });
+
+      String errorMessage = 'Payment failed';
+      switch (response.code) {
+        case Razorpay.NETWORK_ERROR:
+          errorMessage =
+              'Network error. Please check your internet connection.';
+          break;
+        case Razorpay.INVALID_OPTIONS:
+          errorMessage = 'Invalid payment configuration.';
+          break;
+        case Razorpay.PAYMENT_CANCELLED:
+          errorMessage = 'Payment was cancelled.';
+          break;
+        default:
+          errorMessage =
+              response.message ?? 'Payment failed. Please try again.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  /// Handle external wallet selection
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    developer.log('📱 External wallet selected: ${response.walletName}');
+    // External wallet flow will be handled by Razorpay
   }
 
   void _handlePrevious() {
@@ -746,11 +1508,40 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
       }
 
       // Complete the quiz
-      _completeQuizAttempt();
+      await _completeQuizAttempt();
       if (mounted) {
         context.goToQuizResult(
             widget.quizId, _score, _userAnswers, _shuffledQuestions);
       }
+    }
+  }
+
+  /// Complete quiz attempt with optional totalQuestions override (for freemium quizzes)
+  Future<void> _completeQuizAttemptWithTotalQuestions(
+      int score, int totalQuestions) async {
+    if (_currentAttemptId == null || _startTime == null || _exam == null) {
+      return;
+    }
+
+    try {
+      final timeSpent = DateTime.now().difference(_startTime!).inSeconds;
+      final attemptNotifier = ref.read(currentQuizAttemptProvider.notifier);
+
+      developer.log(
+          '🎯 Completing freemium quiz attempt: $_currentAttemptId with score: $score/$totalQuestions');
+
+      await attemptNotifier.completeAttempt(
+        score: score,
+        correctAnswers: score,
+        timeSpent: timeSpent,
+        answers: _userAnswers,
+        totalQuestions: totalQuestions,
+      );
+
+      developer.log('✅ Freemium quiz attempt completed successfully');
+    } catch (e) {
+      developer.log('❌ Error completing freemium quiz attempt: $e');
+      rethrow;
     }
   }
 

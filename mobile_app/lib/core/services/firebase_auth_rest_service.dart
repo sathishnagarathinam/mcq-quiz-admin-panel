@@ -6,7 +6,7 @@ import 'firestore_service.dart';
 class FirebaseAuthRestService {
   static const String _baseUrl = 'https://identitytoolkit.googleapis.com/v1';
   static const String _apiKey =
-      'AIzaSyDIdFTL8Xl-E02bYB_HnuymfGBRRL6xBqk'; // Firebase API key from config
+      'AIzaSyDspopkPaJ8R_xJGW7GoO8FHGvP9VyoL2o'; // Firebase API key from google-services.json
 
   // Storage keys for session data
   static const String _sessionInfoKey = 'firebase_session_info';

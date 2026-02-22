@@ -31,11 +31,11 @@
 
 ```bash
 # Mobile app functions
-cd /Volumes/sathish/mcq/mobile_app/firebase/functions
+cd /Volumes/work/mcq/mobile_app/firebase/functions
 npm run deploy
 
 # Web admin functions
-cd /Volumes/sathish/mcq/web_admin/firebase/functions
+cd /Volumes/work/mcq/web_admin/firebase/functions
 npm run deploy
 ```
 

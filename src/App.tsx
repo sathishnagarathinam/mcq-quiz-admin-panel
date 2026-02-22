@@ -55,6 +55,21 @@ import PaymentManagementPage from './pages/payments/PaymentManagementPage';
 import FreeQuizAccessPage from './pages/free-quiz-access/FreeQuizAccessPage';
 import RatingsManagementPage from './pages/ratings/RatingsManagementPage';
 import LiveTestRegistrationsPage from './pages/live-test-registrations/LiveTestRegistrationsPage';
+import InterstitialAdManagementPage from './pages/interstitial-ads/InterstitialAdManagementPage';
+import ChatbotManagementPage from './pages/chatbot/ChatbotManagementPage';
+import { useAuth } from './contexts/AuthContext';
+
+// Paths allowed for the 'user' role
+const USER_ROLE_ALLOWED_PATHS = ['/dashboard', '/questions', '/categories', '/bulk-upload', '/ratings', '/live-test-registrations'];
+
+// Role-based route protection component
+const RoleGuard: React.FC<{ path: string; children: React.ReactElement }> = ({ path, children }) => {
+  const { adminUser } = useAuth();
+  if (adminUser?.role === 'user' && !USER_ROLE_ALLOWED_PATHS.includes(`/${path}`)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
+};
 
 // Theme configuration
 const theme = createTheme({
@@ -208,45 +223,49 @@ function App() {
                   }
                 >
                   <Route index element={<Navigate to="/dashboard" replace />} />
+                  {/* Routes accessible to all roles including 'user' */}
                   <Route path="dashboard" element={<DashboardPage />} />
                   <Route path="questions" element={<QuestionsPage />} />
                   <Route path="categories" element={<CategoriesPage />} />
-                  <Route path="users" element={<UsersPage />} />
-                  <Route path="analytics" element={<AnalyticsPage />} />
-                  <Route path="mobile-users" element={<MobileUsersPage />} />
-                  <Route path="feedback" element={<FeedbackManagementPage />} />
                   <Route path="bulk-upload" element={<BulkUploadPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
-                  <Route path="settings/payments" element={<PaymentSettingsPage />} />
-                  <Route path="settings/force-update" element={<ForceUpdateSettingsPage />} />
-                  <Route path="settings/user-versions" element={<UserVersionManagementPage />} />
-                  <Route path="test-firebase" element={<FirebaseTestPage />} />
-                  <Route path="config-test" element={<ConfigTestPage />} />
-                  <Route path="data-structure-test" element={<DataStructureTestPage />} />
-                  <Route path="test-data-generator" element={<TestDataGeneratorPage />} />
-                  <Route path="user-quiz-mapping" element={<UserQuizMappingTestPage />} />
-                  <Route path="analytics-refresh" element={<AnalyticsRefreshPage />} />
-                  <Route path="user-management" element={<UserManagementPage />} />
-                  <Route path="banner-management" element={<BannerManagement />} />
-                  <Route path="integration-test" element={<IntegrationTestPage />} />
-                  <Route path="upload-debug" element={<UploadDebugPage />} />
-                  <Route path="upload-diagnostic" element={<UploadDiagnosticPage />} />
-                  <Route path="notifications" element={<NotificationManagementPage />} />
-                  <Route path="notifications/send" element={<NotificationSenderPage />} />
-                  <Route path="notification-test" element={<NotificationTestPage />} />
-                  <Route path="firebase-connection-test" element={<FirebaseConnectionTestPage />} />
-                  <Route path="create-test-users" element={<CreateTestUsersPage />} />
-                  <Route path="user-count-diagnostic" element={<UserCountDiagnosticPage />} />
-                  <Route path="fcm-token-manager" element={<FCMTokenManagerPage />} />
-                  <Route path="exam-hub" element={<ExamHubPage />} />
-                  <Route path="exam-hub/news" element={<NewsManagementPage />} />
-                  <Route path="exam-hub/tips" element={<TipsManagementPage />} />
-                  <Route path="exam-hub/papers" element={<PapersManagementPage />} />
-                  <Route path="exam-hub/results" element={<ResultsManagementPage />} />
-                  <Route path="payments" element={<PaymentManagementPage />} />
-                  <Route path="free-quiz-access" element={<FreeQuizAccessPage />} />
                   <Route path="ratings" element={<RatingsManagementPage />} />
                   <Route path="live-test-registrations" element={<LiveTestRegistrationsPage />} />
+                  {/* Routes restricted from 'user' role */}
+                  <Route path="users" element={<RoleGuard path="users"><UsersPage /></RoleGuard>} />
+                  <Route path="analytics" element={<RoleGuard path="analytics"><AnalyticsPage /></RoleGuard>} />
+                  <Route path="mobile-users" element={<RoleGuard path="mobile-users"><MobileUsersPage /></RoleGuard>} />
+                  <Route path="feedback" element={<RoleGuard path="feedback"><FeedbackManagementPage /></RoleGuard>} />
+                  <Route path="settings" element={<RoleGuard path="settings"><SettingsPage /></RoleGuard>} />
+                  <Route path="settings/payments" element={<RoleGuard path="settings/payments"><PaymentSettingsPage /></RoleGuard>} />
+                  <Route path="settings/force-update" element={<RoleGuard path="settings/force-update"><ForceUpdateSettingsPage /></RoleGuard>} />
+                  <Route path="settings/user-versions" element={<RoleGuard path="settings/user-versions"><UserVersionManagementPage /></RoleGuard>} />
+                  <Route path="test-firebase" element={<RoleGuard path="test-firebase"><FirebaseTestPage /></RoleGuard>} />
+                  <Route path="config-test" element={<RoleGuard path="config-test"><ConfigTestPage /></RoleGuard>} />
+                  <Route path="data-structure-test" element={<RoleGuard path="data-structure-test"><DataStructureTestPage /></RoleGuard>} />
+                  <Route path="test-data-generator" element={<RoleGuard path="test-data-generator"><TestDataGeneratorPage /></RoleGuard>} />
+                  <Route path="user-quiz-mapping" element={<RoleGuard path="user-quiz-mapping"><UserQuizMappingTestPage /></RoleGuard>} />
+                  <Route path="analytics-refresh" element={<RoleGuard path="analytics-refresh"><AnalyticsRefreshPage /></RoleGuard>} />
+                  <Route path="user-management" element={<RoleGuard path="user-management"><UserManagementPage /></RoleGuard>} />
+                  <Route path="banner-management" element={<RoleGuard path="banner-management"><BannerManagement /></RoleGuard>} />
+                  <Route path="integration-test" element={<RoleGuard path="integration-test"><IntegrationTestPage /></RoleGuard>} />
+                  <Route path="upload-debug" element={<RoleGuard path="upload-debug"><UploadDebugPage /></RoleGuard>} />
+                  <Route path="upload-diagnostic" element={<RoleGuard path="upload-diagnostic"><UploadDiagnosticPage /></RoleGuard>} />
+                  <Route path="notifications" element={<RoleGuard path="notifications"><NotificationManagementPage /></RoleGuard>} />
+                  <Route path="notifications/send" element={<RoleGuard path="notifications/send"><NotificationSenderPage /></RoleGuard>} />
+                  <Route path="notification-test" element={<RoleGuard path="notification-test"><NotificationTestPage /></RoleGuard>} />
+                  <Route path="firebase-connection-test" element={<RoleGuard path="firebase-connection-test"><FirebaseConnectionTestPage /></RoleGuard>} />
+                  <Route path="create-test-users" element={<RoleGuard path="create-test-users"><CreateTestUsersPage /></RoleGuard>} />
+                  <Route path="user-count-diagnostic" element={<RoleGuard path="user-count-diagnostic"><UserCountDiagnosticPage /></RoleGuard>} />
+                  <Route path="fcm-token-manager" element={<RoleGuard path="fcm-token-manager"><FCMTokenManagerPage /></RoleGuard>} />
+                  <Route path="exam-hub" element={<RoleGuard path="exam-hub"><ExamHubPage /></RoleGuard>} />
+                  <Route path="exam-hub/news" element={<RoleGuard path="exam-hub/news"><NewsManagementPage /></RoleGuard>} />
+                  <Route path="exam-hub/tips" element={<RoleGuard path="exam-hub/tips"><TipsManagementPage /></RoleGuard>} />
+                  <Route path="exam-hub/papers" element={<RoleGuard path="exam-hub/papers"><PapersManagementPage /></RoleGuard>} />
+                  <Route path="exam-hub/results" element={<RoleGuard path="exam-hub/results"><ResultsManagementPage /></RoleGuard>} />
+                  <Route path="payments" element={<RoleGuard path="payments"><PaymentManagementPage /></RoleGuard>} />
+                  <Route path="free-quiz-access" element={<RoleGuard path="free-quiz-access"><FreeQuizAccessPage /></RoleGuard>} />
+                  <Route path="interstitial-ads" element={<RoleGuard path="interstitial-ads"><InterstitialAdManagementPage /></RoleGuard>} />
+                  <Route path="chatbot" element={<RoleGuard path="chatbot"><ChatbotManagementPage /></RoleGuard>} />
                 </Route>
 
                 {/* Catch all route */}

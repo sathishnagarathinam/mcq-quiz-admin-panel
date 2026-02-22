@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/paid_quiz_access_service.dart';
+import '../../../core/services/exam_service.dart';
 import '../../../core/models/paid_quiz_access_model.dart';
+import '../../../core/models/exam_model.dart';
 import '../../../core/router/app_router.dart';
 
 /// Widget to display user's purchased quizzes on home screen
@@ -89,7 +91,7 @@ class PurchasedQuizzesSection extends ConsumerWidget {
                 itemCount: activeAccess.length,
                 itemBuilder: (context, index) {
                   final access = activeAccess[index];
-                  return _buildPurchasedQuizCard(context, access);
+                  return _PurchasedQuizCard(access: access);
                 },
               ),
             ),
@@ -100,40 +102,137 @@ class PurchasedQuizzesSection extends ConsumerWidget {
   }
 
   Widget _buildLoadingState() {
-    return SizedBox(
+    return const SizedBox(
       height: 145,
-      child: const Center(
+      child: Center(
         child: CircularProgressIndicator(),
       ),
     );
   }
+}
 
-  Widget _buildPurchasedQuizCard(
-    BuildContext context,
-    PaidQuizAccessModel access,
-  ) {
+/// Stateful widget for purchased quiz card that fetches exam details if needed
+class _PurchasedQuizCard extends StatefulWidget {
+  final PaidQuizAccessModel access;
+
+  const _PurchasedQuizCard({required this.access});
+
+  @override
+  State<_PurchasedQuizCard> createState() => _PurchasedQuizCardState();
+}
+
+class _PurchasedQuizCardState extends State<_PurchasedQuizCard> {
+  String? _examName;
+  Color? _cardColor;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExamDetails();
+  }
+
+  Future<void> _loadExamDetails() async {
+    // If examName is already available, use it
+    if (widget.access.examName.isNotEmpty) {
+      setState(() {
+        _examName = widget.access.examName;
+        _isLoading = false;
+      });
+      // Still fetch exam for color
+      _fetchExamColor();
+      return;
+    }
+
+    // Fetch exam details from Firestore
+    try {
+      final exam = await ExamService.getExamById(widget.access.examId);
+      if (exam != null && mounted) {
+        setState(() {
+          _examName = exam.displayName;
+          _cardColor = _getColorForExamType(exam.examType);
+          _isLoading = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _examName = 'Quiz ${widget.access.examId.substring(0, 6)}...';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      developer.log('Error fetching exam details: $e');
+      if (mounted) {
+        setState(() {
+          _examName = 'Quiz ${widget.access.examId.substring(0, 6)}...';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _fetchExamColor() async {
+    try {
+      final exam = await ExamService.getExamById(widget.access.examId);
+      if (exam != null && mounted) {
+        setState(() {
+          _cardColor = _getColorForExamType(exam.examType);
+        });
+      }
+    } catch (e) {
+      developer.log('Error fetching exam color: $e');
+    }
+  }
+
+  Color _getColorForExamType(String examType) {
+    switch (examType.toUpperCase()) {
+      case 'MTS':
+        return Colors.blue;
+      case 'POSTMAN':
+        return Colors.orange;
+      case 'POSTAL_ASSISTANT':
+        return Colors.purple;
+      case 'IPO':
+        return Colors.teal;
+      case 'GROUP_B':
+        return Colors.indigo;
+      default:
+        return AppTheme.primaryColor;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // Calculate days remaining
     final now = DateTime.now();
-    final daysRemaining = access.expiryDate.difference(now).inDays;
+    final daysRemaining = widget.access.expiryDate.difference(now).inDays;
     final isExpiringSoon = daysRemaining <= 3;
+
+    final cardColor = _cardColor ?? AppTheme.primaryColor;
 
     return Container(
       width: 140,
       margin: const EdgeInsets.only(right: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceColor,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cardColor.withValues(alpha: 0.1),
+            AppTheme.surfaceColor,
+          ],
+        ),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderColor),
+        border: Border.all(color: cardColor.withValues(alpha: 0.3)),
       ),
       child: InkWell(
-        onTap: () => context.goToQuizInstructions(access.examId),
+        onTap: () => context.goToQuizInstructions(widget.access.examId),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Purchased badge
+              // Purchased badge with color
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -164,16 +263,24 @@ class PurchasedQuizzesSection extends ConsumerWidget {
 
               // Quiz name
               Expanded(
-                child: Text(
-                  access.examName,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimaryColor,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: _isLoading
+                    ? const Center(
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : Text(
+                        _examName ?? 'Unknown Quiz',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimaryColor,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
               ),
               const SizedBox(height: 8),
 
