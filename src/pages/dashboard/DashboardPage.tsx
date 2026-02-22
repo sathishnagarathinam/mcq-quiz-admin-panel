@@ -254,13 +254,6 @@ const DashboardPage: React.FC = () => {
       allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
     {
-      title: 'Interstitial Ads',
-      description: 'Create and manage full-screen advertisements for mobile app',
-      icon: <ImageIcon />,
-      path: '/interstitial-ads',
-      color: '#FF6B9D',
-    },
-    {
       title: 'Chatbot Management',
       description: 'Manage chatbot solutions, view support tickets, and analytics',
       icon: pendingTicketsCount > 0 ? (
@@ -272,6 +265,7 @@ const DashboardPage: React.FC = () => {
       ),
       path: '/chatbot',
       color: '#00BCD4',
+      allowedRoles: ['admin', 'super_admin', 'system_admin'],
     },
   ];
 
